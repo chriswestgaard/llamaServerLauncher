@@ -150,6 +150,12 @@ namespace LlamaServerLauncher
                 return;
             }
 
+            if (!File.Exists(txtExePath.Text))
+            {
+                MessageBox.Show($"llama-server executable not found:\n{txtExePath.Text}\n\nUse the Advanced tab to set the correct path.", "Executable not found", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+
             string modelFile = cbModel.SelectedItem.ToString() + ".gguf";
             string args = BuildCommand(modelFile);
             RunCommand(args);
