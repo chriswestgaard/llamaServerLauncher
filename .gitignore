@@ -31,6 +31,7 @@ Desktop.ini
 # WAP / MSIX
 AppPackages/
 BundleArtifacts/
+*.assets.cache
 
 # Claude Code
 .claude/
