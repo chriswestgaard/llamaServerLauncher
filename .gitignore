@@ -32,6 +32,7 @@ Desktop.ini
 AppPackages/
 BundleArtifacts/
 *.assets.cache
+*_TemporaryKey.pfx
 
 # Claude Code
 .claude/
