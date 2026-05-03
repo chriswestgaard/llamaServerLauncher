@@ -1,0 +1,33 @@
+# .NET
+# Visual Studio
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Build directories
+bin/
+obj/
+
+# Windows image file caches
+Thumbs.db
+
+# Visual Studio 2019/2022 cache folder
+.vs/
+
+# Rider
+.idea/
+
+# User-specific files
+*.csproj.user
+*.sln.iml
+
+# OS generated files
+Desktop.ini
+
+# Logs
+*.log
+
+# Claude Code
+.claude/
+claude.md
