@@ -17,6 +17,7 @@ namespace LlamaServerLauncher
     {
         private readonly string _configPath = "config.json";
         private string _modelFolder;
+        private string _savedModel = "";
         private Process _proc;
 
         // Hardware monitor
@@ -97,7 +98,14 @@ namespace LlamaServerLauncher
             foreach (var f in files)
                 cbModel.Items.Add(Path.GetFileNameWithoutExtension(f));
             if (cbModel.Items.Count > 0)
-                cbModel.SelectedIndex = 0;
+            {
+                int idx = 0;
+                if (!string.IsNullOrEmpty(_savedModel))
+                    for (int i = 0; i < cbModel.Items.Count; i++)
+                        if (cbModel.Items[i]?.ToString() == _savedModel) { idx = i; break; }
+                _savedModel = "";
+                cbModel.SelectedIndex = idx;
+            }
             UpdateCommandPreview();
         }
 
@@ -147,6 +155,12 @@ namespace LlamaServerLauncher
             RunCommand(args);
         }
 
+        private int GpuLayersValue =>
+            cbNglMode.SelectedIndex == 0 ? -1 :
+            cbNglMode.SelectedIndex == 1 ?  0 :
+            cbNglMode.SelectedIndex == 2 ? 999 :
+            (int)nudGpuLayers.Value;
+
         private string BuildCommand(string modelFile)
         {
             var sb = new StringBuilder();
@@ -160,16 +174,17 @@ namespace LlamaServerLauncher
                 sb.Append($" --host {txtHost.Text}");
             if (nudPort.Value != 8080)
                 sb.Append($" --port {nudPort.Value}");
-            if (nudThreads.Value != -1)
+            if (!chkThreadsAuto.Checked)
                 sb.Append($" --threads {nudThreads.Value}");
             if (nudBatchSize.Value != 2048)
                 sb.Append($" -b {nudBatchSize.Value}");
             if (nudUBatchSize.Value != 512)
                 sb.Append($" -ub {nudUBatchSize.Value}");
-            if (nudCtxSize.Value != 0)
+            if (!chkCtxDefault.Checked)
                 sb.Append($" -c {nudCtxSize.Value}");
-            if (nudGpuLayers.Value != -1)
-                sb.Append($" -ngl {nudGpuLayers.Value}");
+            int ngl = GpuLayersValue;
+            if (ngl != -1)
+                sb.Append($" -ngl {ngl}");
             if (nudParallel.Value > 1)
                 sb.Append($" -np {nudParallel.Value}");
             if (chkFlashAttn.Checked)
@@ -202,7 +217,7 @@ namespace LlamaServerLauncher
                 sb.Append($" --min-p {nudMinP.Value.ToString("F2", ci)}");
             if (nudRepeatPenalty.Value != 1.00M)
                 sb.Append($" --repeat-penalty {nudRepeatPenalty.Value.ToString("F2", ci)}");
-            if (nudSeed.Value != -1)
+            if (!chkSeedRandom.Checked)
                 sb.Append($" --seed {nudSeed.Value}");
 
             // Tools
@@ -350,13 +365,30 @@ namespace LlamaServerLauncher
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            SaveConfig();
             _monitorTimer?.Stop();
             _monitorTimer?.Dispose();
             _cpuCounter?.Dispose();
             _ramAvailCounter?.Dispose();
             lock (_gpuLock) { _gpuEngineCounters.ForEach(c => c.Dispose()); _gpuVramCounters.ForEach(c => c.Dispose()); }
-            if (_proc != null)
-                try { if (!_proc.HasExited) _proc.Kill(entireProcessTree: true); _proc.WaitForExit(5000); } catch { }
+
+            var proc = _proc;
+            if (proc != null)
+            {
+                // Detach the Exited handler so the BeginInvoke callback doesn't fire
+                // against a form that is already being torn down.
+                proc.EnableRaisingEvents = false;
+                try
+                {
+                    if (!proc.HasExited)
+                    {
+                        proc.Kill(entireProcessTree: true);
+                        proc.WaitForExit(5000);
+                    }
+                }
+                catch { }
+            }
+
             base.OnFormClosing(e);
         }
 
@@ -526,23 +558,93 @@ namespace LlamaServerLauncher
         private void LoadConfig()
         {
             if (!File.Exists(_configPath)) return;
-            var json = File.ReadAllText(_configPath);
-            var data = JsonSerializer.Deserialize<Dictionary<string, string>>(json);
-            if (data == null) return;
-            if (data.TryGetValue("folder", out var folder) && !string.IsNullOrEmpty(folder))
-                _modelFolder = folder;
-            if (data.TryGetValue("exePath", out var exe) && !string.IsNullOrEmpty(exe))
-                txtExePath.Text = exe;
+            AppSettings s;
+            try { s = JsonSerializer.Deserialize<AppSettings>(File.ReadAllText(_configPath), _jsonOpts); }
+            catch { return; }
+            if (s == null) return;
+
+            if (!string.IsNullOrEmpty(s.Folder))  _modelFolder    = s.Folder;
+            if (!string.IsNullOrEmpty(s.ExePath)) txtExePath.Text = s.ExePath;
+            _savedModel = s.Model ?? "";
+
+            static decimal Clamp(decimal v, NumericUpDown n) => Math.Max(n.Minimum, Math.Min(n.Maximum, v));
+
+            cbNglMode.SelectedIndex     = Math.Clamp(s.NglMode, 0, cbNglMode.Items.Count - 1);
+            nudGpuLayers.Value          = Clamp(s.GpuLayers, nudGpuLayers);
+            chkCtxDefault.Checked       = s.CtxDefault;
+            nudCtxSize.Value            = Clamp(s.CtxSize, nudCtxSize);
+            nudBatchSize.Value          = Clamp(s.BatchSize, nudBatchSize);
+            nudUBatchSize.Value         = Clamp(s.UBatchSize, nudUBatchSize);
+            if (s.CacheKIndex    >= 0 && s.CacheKIndex    < cbCacheK.Items.Count)    cbCacheK.SelectedIndex    = s.CacheKIndex;
+            if (s.CacheVIndex    >= 0 && s.CacheVIndex    < cbCacheV.Items.Count)    cbCacheV.SelectedIndex    = s.CacheVIndex;
+            if (s.ReasoningIndex >= 0 && s.ReasoningIndex < cbReasoning.Items.Count) cbReasoning.SelectedIndex = s.ReasoningIndex;
+            chkThreadsAuto.Checked      = s.ThreadsAuto;
+            nudThreads.Value            = Clamp(s.Threads, nudThreads);
+            nudParallel.Value           = Clamp(s.Parallel, nudParallel);
+            chkFlashAttn.Checked        = s.FlashAttn;
+            chkContBatching.Checked     = s.ContBatching;
+            chkMmap.Checked             = s.Mmap;
+            chkMlock.Checked            = s.Mlock;
+
+            txtHost.Text                = s.Host ?? "127.0.0.1";
+            nudPort.Value               = Clamp(s.Port, nudPort);
+            txtTools.Text               = s.Tools ?? "";
+
+            nudTemperature.Value        = Clamp(s.Temperature, nudTemperature);
+            nudTopK.Value               = Clamp(s.TopK, nudTopK);
+            nudTopP.Value               = Clamp(s.TopP, nudTopP);
+            nudMinP.Value               = Clamp(s.MinP, nudMinP);
+            chkSeedRandom.Checked       = s.SeedRandom;
+            nudSeed.Value               = Clamp(s.Seed, nudSeed);
+            nudRepeatPenalty.Value      = Clamp(s.RepeatPenalty, nudRepeatPenalty);
+
+            txtApiKey.Text              = s.ApiKey ?? "";
+            chkEmbedding.Checked        = s.Embedding;
+            chkRerank.Checked           = s.Rerank;
+            chkMetrics.Checked          = s.Metrics;
+            txtExtraArgs.Text           = s.ExtraArgs ?? "";
         }
 
         private void SaveConfig()
         {
-            var data = new Dictionary<string, string>
+            var s = new AppSettings
             {
-                ["folder"] = _modelFolder ?? "",
-                ["exePath"] = txtExePath.Text
+                Folder         = _modelFolder ?? "",
+                ExePath        = txtExePath.Text,
+                Model          = cbModel.SelectedItem?.ToString() ?? "",
+                NglMode        = cbNglMode.SelectedIndex,
+                GpuLayers      = (int)nudGpuLayers.Value,
+                CtxDefault     = chkCtxDefault.Checked,
+                CtxSize        = (int)nudCtxSize.Value,
+                BatchSize      = (int)nudBatchSize.Value,
+                UBatchSize     = (int)nudUBatchSize.Value,
+                CacheKIndex    = cbCacheK.SelectedIndex,
+                CacheVIndex    = cbCacheV.SelectedIndex,
+                ReasoningIndex = cbReasoning.SelectedIndex,
+                ThreadsAuto    = chkThreadsAuto.Checked,
+                Threads        = (int)nudThreads.Value,
+                Parallel       = (int)nudParallel.Value,
+                FlashAttn      = chkFlashAttn.Checked,
+                ContBatching   = chkContBatching.Checked,
+                Mmap           = chkMmap.Checked,
+                Mlock          = chkMlock.Checked,
+                Host           = txtHost.Text,
+                Port           = (int)nudPort.Value,
+                Tools          = txtTools.Text,
+                Temperature    = nudTemperature.Value,
+                TopK           = (int)nudTopK.Value,
+                TopP           = nudTopP.Value,
+                MinP           = nudMinP.Value,
+                SeedRandom     = chkSeedRandom.Checked,
+                Seed           = nudSeed.Value,
+                RepeatPenalty  = nudRepeatPenalty.Value,
+                ApiKey         = txtApiKey.Text,
+                Embedding      = chkEmbedding.Checked,
+                Rerank         = chkRerank.Checked,
+                Metrics        = chkMetrics.Checked,
+                ExtraArgs      = txtExtraArgs.Text,
             };
-            File.WriteAllText(_configPath, JsonSerializer.Serialize(data));
+            try { File.WriteAllText(_configPath, JsonSerializer.Serialize(s, _jsonOptsIndented)); } catch { }
         }
 
         private static readonly Regex _tokPerSecRx = new(@"([\d.]+)\s+tokens per second", RegexOptions.Compiled);
@@ -760,12 +862,14 @@ namespace LlamaServerLauncher
             if (!serverRunning)
             {
                 // Static pre-flight advice based on current settings
-                if (hasGpu && nudGpuLayers.Value == 0)
-                    Line("▶ GPU layers is 0 — the model will run entirely on CPU. Set -ngl to 999 to fully use the GPU.", amber);
-                else if (hasGpu && nudGpuLayers.Value == -1)
-                    Line("▶ GPU layers is -1 (auto-detect). Try setting an explicit value if GPU usage seems low.", dim);
+                int nglTip = GpuLayersValue;
+                if (hasGpu && nglTip == 0)
+                    Line("▶ GPU layers set to CPU only — model will run entirely on CPU. Switch to \"GPU only\" or \"Custom\" to use the GPU.", amber);
+                else if (hasGpu && nglTip == -1)
+                    Line("▶ GPU layers is Auto. Try a Custom value if GPU usage seems low after starting.", dim);
 
-                if (nudCtxSize.Value >= 8192 && !chkFlashAttn.Checked)
+                int ctxTip = chkCtxDefault.Checked ? 0 : (int)nudCtxSize.Value;
+                if (ctxTip >= 8192 && !chkFlashAttn.Checked)
                     Line("▶ Large context planned. Enable Flash Attention (-fa) to cut KV VRAM usage for long contexts.", amber);
 
                 if (cbCacheK.Text == "f16" && cbCacheV.Text == "f16" && hasGpu)
@@ -811,15 +915,16 @@ namespace LlamaServerLauncher
                 else
                     Line($"▶ VRAM at {vramPct:F0}% — reduce context size (-c) if you hit out-of-memory errors.", amber);
             }
-            else if (vramPct >= 0 && vramPct < 60 && nudGpuLayers.Value >= 0 && nudGpuLayers.Value < 999)
-                Line($"▶ VRAM has headroom ({vramPct:F0}% used). You could increase GPU layers (-ngl) or context size (-c).", green);
+            else if (vramPct >= 0 && vramPct < 60 && GpuLayersValue >= 0 && GpuLayersValue < 999)
+                Line($"▶ VRAM has headroom ({vramPct:F0}% used). You could increase GPU layers or context size.", green);
 
             // 4. Flash attention for large contexts
-            if (nudCtxSize.Value >= 8192 && !chkFlashAttn.Checked)
-                Line($"▶ Context is {nudCtxSize.Value:N0} tokens — enable Flash Attention (-fa) to reduce VRAM usage and improve long-context speed.", amber);
+            int ctxLive = chkCtxDefault.Checked ? 0 : (int)nudCtxSize.Value;
+            if (ctxLive >= 8192 && !chkFlashAttn.Checked)
+                Line($"▶ Context is {ctxLive:N0} tokens — enable Flash Attention (-fa) to reduce VRAM usage and improve long-context speed.", amber);
         }
 
-        private void SavePerformanceSession(int exitCode)
+        private void SavePerformanceSession(int _)
         {
             if (_metricsCpu.Count == 0) return;
 
@@ -909,11 +1014,11 @@ namespace LlamaServerLauncher
 
             var resolved = requests.Select(r => (r, p: r.Params ?? ParsePerfParams(r.Args ?? ""), argsLabel: StripModelArg(r.Args ?? ""))).ToList();
 
+            bool serverRunningForHighlight = false;
+            try { serverRunningForHighlight = _proc != null && !_proc.HasExited; } catch { }
+
             foreach (var modelGroup in resolved.GroupBy(x => x.r.Model).OrderBy(g => g.Key))
             {
-                var modelNode = new TreeNode(modelGroup.Key) { ForeColor = green, NodeFont = boldFont };
-                treePerf.Nodes.Add(modelNode);
-
                 var byConfig = modelGroup
                     .GroupBy(x => x.argsLabel)
                     .Select(g =>
@@ -928,14 +1033,26 @@ namespace LlamaServerLauncher
                     .OrderByDescending(x => x.GenAvg)
                     .ToList();
 
+                double bestTps  = byConfig.Count > 0 ? byConfig.Max(c => c.GenAvg) : -1;
+                string tpsSuffix = bestTps >= 0 ? $"  ({bestTps:F1} t/s)" : "";
+                bool isActive   = serverRunningForHighlight && _sessionModel == modelGroup.Key;
+                string prefix   = isActive ? "> " : "";
+
+                var modelNode = new TreeNode($"{prefix}{modelGroup.Key}{tpsSuffix}")
+                {
+                    ForeColor = isActive ? System.Drawing.Color.White : green,
+                    NodeFont  = boldFont
+                };
+                treePerf.Nodes.Add(modelNode);
+
                 for (int i = 0; i < byConfig.Count; i++)
                 {
                     var (ArgsLabel, Params, GenAvg, PrefillAvg, Runs) = byConfig[i];
                     bool isBest = i == 0 && byConfig.Count > 1;
 
-                    string star      = isBest ? "★ " : "  ";
-                    string tpsPart   = GenAvg >= 0 ? $"{GenAvg:F1} t/s avg" : "no data";
-                    string countPart = Runs.Count == 1 ? "1 run" : $"{Runs.Count} runs";
+                    string star       = isBest ? "★ " : "  ";
+                    string tpsPart    = GenAvg >= 0 ? $"{GenAvg:F1} t/s avg" : "no data";
+                    string countPart  = Runs.Count == 1 ? "1 run" : $"{Runs.Count} runs";
                     string configText = $"{star}{tpsPart}  ({countPart})   {ArgsLabel}";
 
                     var configNode = new TreeNode(configText)
@@ -958,8 +1075,7 @@ namespace LlamaServerLauncher
                         configNode.Nodes.Add(runNode);
                     }
                 }
-
-                modelNode.Expand();
+                // collapsed by default — user expands what they need
             }
 
             treePerf.EndUpdate();
@@ -1020,9 +1136,16 @@ namespace LlamaServerLauncher
             static decimal Clamp(decimal val, NumericUpDown n) =>
                 Math.Max(n.Minimum, Math.Min(n.Maximum, val));
 
-            nudCtxSize.Value     = Clamp(p.CtxSize,                                  nudCtxSize);
-            nudGpuLayers.Value   = Clamp(p.GpuLayers,                                nudGpuLayers);
-            nudThreads.Value     = Clamp(p.Threads,                                   nudThreads);
+            if (p.GpuLayers == -1)         cbNglMode.SelectedIndex = 0;
+            else if (p.GpuLayers == 0)     cbNglMode.SelectedIndex = 1;
+            else if (p.GpuLayers == 999)   cbNglMode.SelectedIndex = 2;
+            else { cbNglMode.SelectedIndex = 3; nudGpuLayers.Value = Clamp(p.GpuLayers, nudGpuLayers); }
+
+            if (p.Threads == -1) chkThreadsAuto.Checked = true;
+            else { chkThreadsAuto.Checked = false; nudThreads.Value = Clamp(p.Threads, nudThreads); }
+
+            if (p.CtxSize == 0) chkCtxDefault.Checked = true;
+            else { chkCtxDefault.Checked = false; nudCtxSize.Value = Clamp(p.CtxSize, nudCtxSize); }
             nudBatchSize.Value   = Clamp(p.BatchSize  > 0 ? p.BatchSize  : 2048,     nudBatchSize);
             nudUBatchSize.Value  = Clamp(p.UbatchSize > 0 ? p.UbatchSize : 512,      nudUBatchSize);
             chkFlashAttn.Checked = p.FlashAttn;
@@ -1036,6 +1159,44 @@ namespace LlamaServerLauncher
             SelectCombo(cbCacheV, p.CacheTypeV);
 
             tabMain.SelectedTab = tabModel;
+        }
+
+        private sealed class AppSettings
+        {
+            public string  Folder         { get; set; } = "";
+            public string  ExePath        { get; set; } = "";
+            public string  Model          { get; set; } = "";
+            public int     NglMode        { get; set; } = 0;
+            public decimal GpuLayers      { get; set; } = 32;
+            public bool    CtxDefault     { get; set; } = true;
+            public decimal CtxSize        { get; set; } = 4096;
+            public decimal BatchSize      { get; set; } = 2048;
+            public decimal UBatchSize     { get; set; } = 512;
+            public int     CacheKIndex    { get; set; } = 0;
+            public int     CacheVIndex    { get; set; } = 0;
+            public int     ReasoningIndex { get; set; } = 0;
+            public bool    ThreadsAuto    { get; set; } = true;
+            public decimal Threads        { get; set; } = 4;
+            public decimal Parallel       { get; set; } = 1;
+            public bool    FlashAttn      { get; set; } = false;
+            public bool    ContBatching   { get; set; } = false;
+            public bool    Mmap           { get; set; } = true;
+            public bool    Mlock          { get; set; } = false;
+            public string  Host           { get; set; } = "127.0.0.1";
+            public decimal Port           { get; set; } = 8080;
+            public string  Tools          { get; set; } = "";
+            public decimal Temperature    { get; set; } = 0.80M;
+            public decimal TopK           { get; set; } = 40;
+            public decimal TopP           { get; set; } = 0.95M;
+            public decimal MinP           { get; set; } = 0.05M;
+            public bool    SeedRandom     { get; set; } = true;
+            public decimal Seed           { get; set; } = 0;
+            public decimal RepeatPenalty  { get; set; } = 1.00M;
+            public string  ApiKey         { get; set; } = "";
+            public bool    Embedding      { get; set; } = false;
+            public bool    Rerank         { get; set; } = false;
+            public bool    Metrics        { get; set; } = false;
+            public string  ExtraArgs      { get; set; } = "";
         }
 
         private static readonly Regex _rxCtx      = new(@"(?:-c|--ctx-size)\s+(\d+)",       RegexOptions.Compiled);

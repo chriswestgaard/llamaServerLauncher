@@ -25,6 +25,8 @@ namespace LlamaServerLauncher
         private Button btnBrowse;
         private ComboBox cbModel;
         private NumericUpDown nudGpuLayers, nudCtxSize;
+        private ComboBox cbNglMode;
+        private CheckBox chkThreadsAuto, chkCtxDefault, chkSeedRandom;
         private TextBox txtCpuInfo, txtGpuInfo;
         private UsageGraph graphCpu, graphRam, graphGpu, graphVram, graphCtx;
 
@@ -80,8 +82,12 @@ namespace LlamaServerLauncher
 
             this.btnBrowse       = new Button    { Text = "...", Dock = DockStyle.Fill };
             this.cbModel         = new ComboBox  { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
-            this.nudGpuLayers    = new NumericUpDown { Dock = DockStyle.Fill, Minimum = -1, Maximum = 999,    Value = -1    };
-            this.nudCtxSize      = new NumericUpDown { Dock = DockStyle.Fill, Minimum = 0,  Maximum = 131072, Value = 0,     Increment = 1024 };
+            this.cbNglMode       = new ComboBox { Width = 110, DropDownStyle = ComboBoxStyle.DropDownList };
+            this.cbNglMode.Items.AddRange(new[] { "Auto", "CPU only", "GPU only", "Custom" });
+            this.cbNglMode.SelectedIndex = 0;
+            this.nudGpuLayers    = new NumericUpDown { Minimum = 1, Maximum = 998, Value = 32, Width = 60, Visible = false };
+            this.chkCtxDefault   = new CheckBox { Text = "Model default", AutoSize = true, Checked = true, Margin = new Padding(0, 2, 8, 0) };
+            this.nudCtxSize      = new NumericUpDown { Minimum = 512, Maximum = 131072, Value = 4096, Increment = 1024, Width = 80, Visible = false };
             this.txtCpuInfo      = new TextBox { ReadOnly = true, Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, BackColor = System.Drawing.SystemColors.Control, ForeColor = System.Drawing.Color.DimGray, TabStop = false };
             this.txtGpuInfo      = new TextBox { ReadOnly = true, Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, BackColor = System.Drawing.SystemColors.Control, ForeColor = System.Drawing.Color.DimGray, TabStop = false };
             this.graphCpu  = new UsageGraph { Dock = DockStyle.Fill, Title = "CPU",     GraphColor = Color.FromArgb( 19, 194,  56), Margin = new Padding(0, 2, 2, 0) };
@@ -92,7 +98,8 @@ namespace LlamaServerLauncher
 
             this.txtHost         = new TextBox   { Dock = DockStyle.Fill, Text = "127.0.0.1" };
             this.nudPort         = new NumericUpDown { Dock = DockStyle.Fill, Minimum = 1,  Maximum = 65535, Value = 8080  };
-            this.nudThreads      = new NumericUpDown { Dock = DockStyle.Fill, Minimum = -1, Maximum = 256,   Value = -1   };
+            this.chkThreadsAuto  = new CheckBox { Text = "Auto", AutoSize = true, Checked = true, Margin = new Padding(0, 2, 8, 0) };
+            this.nudThreads      = new NumericUpDown { Minimum = 1, Maximum = 256, Value = 4, Width = 60, Visible = false };
             this.nudParallel     = new NumericUpDown { Dock = DockStyle.Fill, Minimum = 1,  Maximum = 128,   Value = 1    };
             this.nudBatchSize    = new NumericUpDown { Dock = DockStyle.Fill, Minimum = 1,  Maximum = 65536, Value = 2048 };
             this.nudUBatchSize   = new NumericUpDown { Dock = DockStyle.Fill, Minimum = 1,  Maximum = 65536, Value = 512  };
@@ -110,7 +117,8 @@ namespace LlamaServerLauncher
             this.nudTopK          = new NumericUpDown { Dock = DockStyle.Fill, Minimum = 0,  Maximum = 10000,        Value = 40    };
             this.nudTopP          = new NumericUpDown { Dock = DockStyle.Fill, Minimum = 0M, Maximum = 1M,           Value = 0.95M, DecimalPlaces = 2, Increment = 0.01M };
             this.nudMinP          = new NumericUpDown { Dock = DockStyle.Fill, Minimum = 0M, Maximum = 1M,           Value = 0.05M, DecimalPlaces = 2, Increment = 0.01M };
-            this.nudSeed          = new NumericUpDown { Dock = DockStyle.Fill, Minimum = -1, Maximum = int.MaxValue, Value = -1    };
+            this.chkSeedRandom    = new CheckBox { Text = "Random", AutoSize = true, Checked = true, Margin = new Padding(0, 2, 8, 0) };
+            this.nudSeed          = new NumericUpDown { Minimum = 0, Maximum = int.MaxValue, Value = 0, Width = 100, Visible = false };
             this.nudRepeatPenalty = new NumericUpDown { Dock = DockStyle.Fill, Minimum = 0M, Maximum = 3M,           Value = 1.00M, DecimalPlaces = 2, Increment = 0.05M };
 
             this.txtApiKey    = new TextBox { Dock = DockStyle.Fill };
@@ -155,8 +163,17 @@ namespace LlamaServerLauncher
             tlpPerfCols.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             var tlpPerfL = MakeTlp(7);
-            AddRow(tlpPerfL, 0, MakeLbl("GPU Layers  (-ngl)"),   this.nudGpuLayers,  "Max layers to store in VRAM.\n-1 = use server default (auto-detect).\n0 = CPU only, 999 = all layers. (-ngl)");
-            AddRow(tlpPerfL, 1, MakeLbl("Context Size  (-c)"),   this.nudCtxSize,    "Size of the prompt context in tokens (default: 0).\n0 = loaded from model metadata.\nLarger contexts require more VRAM/RAM. (-c)");
+            var pnlNgl = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+            pnlNgl.Controls.Add(this.cbNglMode);
+            pnlNgl.Controls.Add(this.nudGpuLayers);
+            this.cbNglMode.SelectedIndexChanged += (_, _) => this.nudGpuLayers.Visible = this.cbNglMode.SelectedIndex == 3;
+            AddRow(tlpPerfL, 0, MakeLbl("GPU Layers  (-ngl)"),  pnlNgl, "Number of model layers to offload to GPU VRAM.\nAuto  = server decides at startup.\nCPU only  = no GPU offload.\nGPU only  = all layers (passes -ngl 999).\nCustom  = specify exact layer count. (-ngl)");
+
+            var pnlCtx = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+            pnlCtx.Controls.Add(this.chkCtxDefault);
+            pnlCtx.Controls.Add(this.nudCtxSize);
+            this.chkCtxDefault.CheckedChanged += (_, _) => this.nudCtxSize.Visible = !this.chkCtxDefault.Checked;
+            AddRow(tlpPerfL, 1, MakeLbl("Context Size  (-c)"),  pnlCtx, "Maximum number of tokens in the context window.\n\"Model default\" uses the value embedded in the model file.\nLarger contexts require more VRAM/RAM. (-c)");
             AddRow(tlpPerfL, 2, MakeLbl("Batch Size  (-b)"),     this.nudBatchSize,  "Logical maximum batch size (default: 2048).\nLarger values improve prompt-processing throughput. (-b)");
             AddRow(tlpPerfL, 3, MakeLbl("UBatch Size  (-ub)"),   this.nudUBatchSize, "Physical maximum batch size (default: 512).\nSmaller values reduce peak VRAM usage. (-ub)");
             AddRow(tlpPerfL, 4, MakeLbl("Cache Type K  (-ctk)"), this.cbCacheK,      "KV cache data type for Keys (default: f16).\nAllowed: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1.\nbf16 / q8_0 saves VRAM with minor quality loss. (-ctk)");
@@ -164,7 +181,11 @@ namespace LlamaServerLauncher
             AddRow(tlpPerfL, 6, MakeLbl("Reasoning  (-rea)"),    this.cbReasoning,   "Use reasoning/thinking in chat (default: auto).\n'auto' = detect from model template.\n'on'   = enable reasoning tokens.\n'off'  = disable reasoning. (-rea)");
 
             var tlpPerfR = MakeTlp(6);
-            AddRow(tlpPerfR, 0, MakeLbl("Threads  (-t)"),         this.nudThreads,  "CPU threads used during generation.\n-1 = use server default (auto-detect).\nFor best results, match to physical core count. (-t)");
+            var pnlThreads = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+            pnlThreads.Controls.Add(this.chkThreadsAuto);
+            pnlThreads.Controls.Add(this.nudThreads);
+            this.chkThreadsAuto.CheckedChanged += (_, _) => this.nudThreads.Visible = !this.chkThreadsAuto.Checked;
+            AddRow(tlpPerfR, 0, MakeLbl("Threads  (-t)"),  pnlThreads, "CPU threads used during generation.\nAuto = server detects from CPU core count.\nFor best results, match to physical core count. (-t)");
             AddRow(tlpPerfR, 1, MakeLbl("Parallel Slots  (-np)"), this.nudParallel, "Number of parallel sequences to decode (default: 1).\nEach slot reserves additional KV-cache memory. (-np)");
             AddChk(tlpPerfR, 2, this.chkFlashAttn,    "Flash Attention: faster inference and lower VRAM usage (default: auto).\nChecked = force on; unchecked = use default (auto).\nRequires a compatible model. (-fa)");
             AddChk(tlpPerfR, 3, this.chkContBatching, "Process new requests without waiting for current ones to finish.\nImproves throughput under concurrent load. (-cb)");
@@ -277,10 +298,14 @@ namespace LlamaServerLauncher
             // ── SAMPLING TAB ────────────────────────────────────────────
             var tlpSampling = MakeTlp(6);
             AddRow(tlpSampling, 0, MakeLbl("Temperature"),       this.nudTemperature,   "Controls randomness of token selection (default: 0.80).\n0 = greedy / deterministic.\nHigher = more creative but less coherent. (--temperature)");
-            AddRow(tlpSampling, 1, MakeLbl("Top-K  (--top-k)"),  this.nudTopK,          "Top-K sampling (default: 40, 0 = disabled).\nOnly sample from the K most likely tokens. (--top-k)");
-            AddRow(tlpSampling, 2, MakeLbl("Top-P  (--top-p)"),  this.nudTopP,          "Nucleus sampling (default: 0.95, 1.0 = disabled).\nOnly consider tokens within the top cumulative probability. (--top-p)");
-            AddRow(tlpSampling, 3, MakeLbl("Min-P  (--min-p)"),  this.nudMinP,          "Min-P sampling (default: 0.05, 0.0 = disabled).\nMinimum probability relative to the top token. (--min-p)");
-            AddRow(tlpSampling, 4, MakeLbl("Seed  (-s)"),        this.nudSeed,          "RNG seed for reproducible outputs (default: -1).\n-1 = use a random seed each run. (-s)");
+            AddRow(tlpSampling, 1, MakeLbl("Top-K  (0 = disabled)"),   this.nudTopK, "Top-K sampling (default: 40, 0 = disabled).\nOnly sample from the K most likely tokens. (--top-k)");
+            AddRow(tlpSampling, 2, MakeLbl("Top-P  (1.0 = disabled)"), this.nudTopP, "Nucleus sampling (default: 0.95, 1.0 = disabled).\nOnly consider tokens within the top cumulative probability. (--top-p)");
+            AddRow(tlpSampling, 3, MakeLbl("Min-P  (0.0 = disabled)"), this.nudMinP, "Min-P sampling (default: 0.05, 0.0 = disabled).\nMinimum probability relative to the top token. (--min-p)");
+            var pnlSeed = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+            pnlSeed.Controls.Add(this.chkSeedRandom);
+            pnlSeed.Controls.Add(this.nudSeed);
+            this.chkSeedRandom.CheckedChanged += (_, _) => this.nudSeed.Visible = !this.chkSeedRandom.Checked;
+            AddRow(tlpSampling, 4, MakeLbl("Seed  (-s)"), pnlSeed, "RNG seed for reproducible outputs.\nRandom = different output each run.\nFixed seed = same output for the same prompt. (-s)");
             AddRow(tlpSampling, 5, MakeLbl("Repeat Penalty"),    this.nudRepeatPenalty, "Penalize repeat sequence of tokens (default: 1.00, 1.0 = disabled).\nHigher values reduce repetition. (--repeat-penalty)");
             this.tabSampling.Controls.Add(Scrollable(tlpSampling));
 
@@ -330,7 +355,37 @@ namespace LlamaServerLauncher
                 ShowRootLines = true,
                 HideSelection = false,
                 FullRowSelect = true,
-                ItemHeight = 22
+                ItemHeight = 22,
+                DrawMode = TreeViewDrawMode.OwnerDrawText
+            };
+            this.treePerf.DrawNode += (_, e) =>
+            {
+                if (e.Node == null) { e.DrawDefault = true; return; }
+
+                string text = e.Node.Text;
+                int    sep  = text.LastIndexOf("  (");
+                bool hasTps = sep >= 0 && text.EndsWith(" t/s)");
+
+                if (!hasTps) { e.DrawDefault = true; return; }
+
+                bool selected = (e.State & TreeNodeStates.Selected) != 0;
+                var  font     = e.Node.NodeFont ?? this.treePerf.Font;
+
+                using var bgBrush = new SolidBrush(selected ? Color.FromArgb(40, 70, 40) : this.treePerf.BackColor);
+                e.Graphics.FillRectangle(bgBrush, e.Bounds);
+
+                string namePart = text.Substring(0, sep);
+                string tpsPart  = text.Substring(sep);
+                var nameColor   = selected ? Color.White : e.Node.ForeColor;
+                var tpsColor    = selected ? Color.LightYellow : Color.FromArgb(255, 200, 0);
+
+                int nameW = TextRenderer.MeasureText(e.Graphics, namePart, font, Size.Empty, TextFormatFlags.NoPadding).Width;
+                TextRenderer.DrawText(e.Graphics, namePart, font,
+                    new Rectangle(e.Bounds.Left, e.Bounds.Top, nameW, e.Bounds.Height),
+                    nameColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                TextRenderer.DrawText(e.Graphics, tpsPart, font,
+                    new Rectangle(e.Bounds.Left + nameW, e.Bounds.Top, e.Bounds.Width - nameW, e.Bounds.Height),
+                    tpsColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
             };
             this.treePerf.DoubleClick += (_, _) => LoadSelectedPerfConfig();
             this.treePerf.MouseMove += (_, e) =>
@@ -399,16 +454,16 @@ namespace LlamaServerLauncher
             void refreshPreview(object s, System.EventArgs e) => UpdateCommandPreview();
             foreach (var n in new NumericUpDown[] { nudGpuLayers, nudCtxSize, nudPort, nudThreads, nudParallel, nudBatchSize, nudUBatchSize, nudTemperature, nudTopK, nudTopP, nudMinP, nudSeed, nudRepeatPenalty })
                 n.ValueChanged += refreshPreview;
-            foreach (var c in new CheckBox[] { chkFlashAttn, chkContBatching, chkMmap, chkMlock, chkEmbedding, chkRerank, chkMetrics })
+            foreach (var c in new CheckBox[] { chkFlashAttn, chkContBatching, chkMmap, chkMlock, chkEmbedding, chkRerank, chkMetrics, chkThreadsAuto, chkCtxDefault, chkSeedRandom })
                 c.CheckedChanged += refreshPreview;
-            foreach (var c in new ComboBox[] { cbModel, cbCacheK, cbCacheV, cbReasoning })
+            foreach (var c in new ComboBox[] { cbModel, cbCacheK, cbCacheV, cbReasoning, cbNglMode })
                 c.SelectedIndexChanged += refreshPreview;
             foreach (var t in new TextBox[] { txtHost, txtTools, txtApiKey, txtExtraArgs, txtExePath })
                 t.TextChanged += refreshPreview;
 
             // ── Form ──────────────────────────────────────────────────────
-            this.ClientSize   = new Size(960, 1024);
-            this.MinimumSize  = new Size(860, 720);
+            this.ClientSize   = new Size(1200, 1024);
+            this.MinimumSize  = new Size(1000, 720);
             this.Controls.Add(this.tlpMain);
             this.FormBorderStyle = FormBorderStyle.Sizable;
             this.StartPosition   = FormStartPosition.CenterScreen;
