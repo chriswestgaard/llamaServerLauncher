@@ -468,7 +468,8 @@ namespace LlamaServerLauncher
             this.FormBorderStyle = FormBorderStyle.Sizable;
             this.StartPosition   = FormStartPosition.CenterScreen;
             this.Text = "Llama-Server Launcher";
-            try { this.Icon = new System.Drawing.Icon("app.ico"); } catch { }
+            var iconStream = typeof(MainForm).Assembly.GetManifestResourceStream("LlamaServerLauncher.app.ico");
+            if (iconStream != null) this.Icon = new System.Drawing.Icon(iconStream);
         }
 
         // ── Layout helpers ────────────────────────────────────────────────
