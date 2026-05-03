@@ -12,6 +12,9 @@ A Windows desktop GUI for launching and managing [llama-server](https://github.c
 - **Command preview** — the full llama-server command is shown before launching
 - **One-click chat UI** — opens the built-in llama.cpp web UI in your browser
 
+<img width="581" height="517" alt="screenshot" src="https://github.com/user-attachments/assets/8489f2d9-7af7-46ee-95a6-16051084232f" />
+
+
 ## Requirements
 
 - Windows 10 / 11
@@ -64,6 +67,9 @@ API key, embedding mode, reranking mode, Prometheus metrics endpoint, custom ext
 ## Performance Tab
 
 After running the server and sending requests, the **Perf** tab shows each model with its best recorded tokens/sec. Expand a model to see results per configuration. Double-click a result row to load that configuration back into the controls.
+
+<img width="488" height="237" alt="screenshot2" src="https://github.com/user-attachments/assets/8164c114-74bc-4059-9a63-2b59c8af904e" />
+
 
 ## Building from Source
 
