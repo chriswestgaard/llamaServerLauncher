@@ -2,6 +2,8 @@
 
 A Windows desktop GUI for launching and managing [llama-server](https://github.com/ggml-org/llama.cpp) (llama.cpp).
 
+<img width="581" height="517" alt="screenshot" align="center" src="https://github.com/user-attachments/assets/8489f2d9-7af7-46ee-95a6-16051084232f" />
+
 ## Features
 
 - **Model selection** — browse a folder of `.gguf` files and pick a model from a drop-down
@@ -11,9 +13,6 @@ A Windows desktop GUI for launching and managing [llama-server](https://github.c
 - **Settings persistence** — all controls are saved to `config.json` on close and restored at startup
 - **Command preview** — the full llama-server command is shown before launching
 - **One-click chat UI** — opens the built-in llama.cpp web UI in your browser
-
-<img width="581" height="517" alt="screenshot" src="https://github.com/user-attachments/assets/8489f2d9-7af7-46ee-95a6-16051084232f" />
-
 
 ## Requirements
 
