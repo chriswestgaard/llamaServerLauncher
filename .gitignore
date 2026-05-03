@@ -28,6 +28,10 @@ Desktop.ini
 # Logs
 *.log
 
+# WAP / MSIX
+AppPackages/
+BundleArtifacts/
+
 # Claude Code
 .claude/
 claude.md
