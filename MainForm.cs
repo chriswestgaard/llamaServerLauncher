@@ -18,6 +18,7 @@ namespace LlamaServerLauncher
         private readonly string _configPath = "config.json";
         private string _modelFolder;
         private string _savedModel = "";
+        private string _mmprojPath = "";
         private Process _proc;
 
         // Hardware monitor
@@ -164,6 +165,11 @@ namespace LlamaServerLauncher
             RunCommand(args);
         }
 
+        private string HostValue =>
+            rdoHostLocal.Checked ? "127.0.0.1" :
+            rdoHostAll.Checked   ? "0.0.0.0"   :
+            txtHostCustom.Text.Trim();
+
         private int GpuLayersValue =>
             cbNglMode.SelectedIndex == 0 ? -1 :
             cbNglMode.SelectedIndex == 1 ?  0 :
@@ -177,10 +183,13 @@ namespace LlamaServerLauncher
 
             string modelPath = Path.Combine(_modelFolder ?? "", modelFile);
             sb.Append($"-m \"{modelPath}\"");
+            if (chkMmproj.Checked && !string.IsNullOrEmpty(_mmprojPath))
+                sb.Append($" --mmproj \"{_mmprojPath}\"");
 
             // Server — only emit when value differs from llama-server's built-in default
-            if (txtHost.Text != "127.0.0.1")
-                sb.Append($" --host {txtHost.Text}");
+            string host = HostValue;
+            if (host != "127.0.0.1")
+                sb.Append($" --host {host}");
             if (nudPort.Value != 8080)
                 sb.Append($" --port {nudPort.Value}");
             if (!chkThreadsAuto.Checked)
@@ -355,6 +364,26 @@ namespace LlamaServerLauncher
             catch { }
 
             btnLaunch.Enabled = true;
+        }
+
+        private void btnBrowseMmproj_Click(object sender, EventArgs e)
+        {
+            using var dialog = new OpenFileDialog
+            {
+                Filter = "GGUF files (*.gguf)|*.gguf|All files (*.*)|*.*",
+                Title = "Select multimodal projector file"
+            };
+            if (!string.IsNullOrEmpty(_mmprojPath))
+                try { dialog.InitialDirectory = Path.GetDirectoryName(_mmprojPath); } catch { }
+            else if (!string.IsNullOrEmpty(_modelFolder))
+                dialog.InitialDirectory = _modelFolder;
+            if (dialog.ShowDialog() == DialogResult.OK)
+            {
+                _mmprojPath = dialog.FileName;
+                txtMmprojPath.Text = _mmprojPath;
+                SaveConfig();
+                UpdateCommandPreview();
+            }
         }
 
         private void btnBrowseExe_Click(object sender, EventArgs e)
@@ -623,7 +652,10 @@ namespace LlamaServerLauncher
             chkMmap.Checked             = s.Mmap;
             chkMlock.Checked            = s.Mlock;
 
-            txtHost.Text                = s.Host ?? "127.0.0.1";
+            string host = s.Host ?? "127.0.0.1";
+            if (host == "0.0.0.0")      rdoHostAll.Checked    = true;
+            else if (host == "127.0.0.1") rdoHostLocal.Checked = true;
+            else { rdoHostCustom.Checked = true; txtHostCustom.Text = host; }
             nudPort.Value               = Clamp(s.Port, nudPort);
             txtTools.Text               = s.Tools ?? "";
 
@@ -640,6 +672,9 @@ namespace LlamaServerLauncher
             chkRerank.Checked           = s.Rerank;
             chkMetrics.Checked          = s.Metrics;
             txtExtraArgs.Text           = s.ExtraArgs ?? "";
+            chkMmproj.Checked           = s.MmprojEnabled;
+            _mmprojPath                 = s.MmprojPath ?? "";
+            txtMmprojPath.Text          = _mmprojPath;
         }
 
         private void SaveConfig()
@@ -665,7 +700,7 @@ namespace LlamaServerLauncher
                 ContBatching   = chkContBatching.Checked,
                 Mmap           = chkMmap.Checked,
                 Mlock          = chkMlock.Checked,
-                Host           = txtHost.Text,
+                Host           = HostValue,
                 Port           = (int)nudPort.Value,
                 Tools          = txtTools.Text,
                 Temperature    = nudTemperature.Value,
@@ -680,6 +715,8 @@ namespace LlamaServerLauncher
                 Rerank            = chkRerank.Checked,
                 Metrics           = chkMetrics.Checked,
                 ExtraArgs         = txtExtraArgs.Text,
+                MmprojEnabled     = chkMmproj.Checked,
+                MmprojPath        = _mmprojPath,
             };
             try { File.WriteAllText(_configPath, JsonSerializer.Serialize(s, _jsonOptsIndented)); } catch { }
         }
@@ -1251,6 +1288,8 @@ namespace LlamaServerLauncher
             public bool    Rerank         { get; set; } = false;
             public bool    Metrics           { get; set; } = false;
             public string  ExtraArgs         { get; set; } = "";
+            public bool    MmprojEnabled     { get; set; } = false;
+            public string  MmprojPath        { get; set; } = "";
         }
 
         private static readonly Regex _rxCtx      = new(@"(?:-c|--ctx-size)\s+(\d+)",       RegexOptions.Compiled);

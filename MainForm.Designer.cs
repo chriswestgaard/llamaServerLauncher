@@ -24,6 +24,9 @@ namespace LlamaServerLauncher
 
         private Button btnBrowse;
         private ComboBox cbModel;
+        private CheckBox chkMmproj;
+        private TextBox txtMmprojPath;
+        private Button btnBrowseMmproj;
         private NumericUpDown nudGpuLayers, nudCtxSize;
         private ComboBox cbNglMode;
         private CheckBox chkThreadsAuto, chkCtxDefault, chkSeedRandom;
@@ -31,7 +34,8 @@ namespace LlamaServerLauncher
         private UsageGraph graphCpu, graphRam, graphGpu, graphVram, graphCtx;
 
         // Server tab
-        private TextBox txtHost, txtTools;
+        private RadioButton rdoHostLocal, rdoHostAll, rdoHostCustom;
+        private TextBox txtHostCustom, txtTools;
         private NumericUpDown nudPort, nudThreads, nudParallel, nudBatchSize, nudUBatchSize;
         private CheckBox chkFlashAttn, chkContBatching;
 
@@ -80,7 +84,10 @@ namespace LlamaServerLauncher
             this.tabAdvanced    = new TabPage { Text = "Advanced" };
 
 
-            this.btnBrowse       = new Button    { Text = "...", Dock = DockStyle.Fill };
+            this.btnBrowse        = new Button    { Text = "...", Dock = DockStyle.Fill };
+            this.chkMmproj        = new CheckBox { Text = "", AutoSize = true, Margin = new Padding(3, 0, 4, 0), Anchor = AnchorStyles.None };
+            this.txtMmprojPath    = new TextBox  { Dock = DockStyle.Fill, ReadOnly = true, Enabled = false };
+            this.btnBrowseMmproj  = new Button   { Text = "...", Dock = DockStyle.Fill, Enabled = false };
             this.cbModel         = new ComboBox  { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
             this.cbNglMode       = new ComboBox { Width = 110, DropDownStyle = ComboBoxStyle.DropDownList };
             this.cbNglMode.Items.AddRange(new[] { "Auto", "CPU only", "GPU only", "Custom" });
@@ -96,7 +103,10 @@ namespace LlamaServerLauncher
             this.graphVram = new UsageGraph { Dock = DockStyle.Fill, Title = "VRAM",    GraphColor = Color.FromArgb(255, 100,   0), Margin = new Padding(2, 2, 0, 0) };
             this.graphCtx  = new UsageGraph { Dock = DockStyle.Fill, Title = "Context", GraphColor = Color.FromArgb(180, 100, 255), Margin = new Padding(0, 2, 0,  0) };
 
-            this.txtHost         = new TextBox   { Dock = DockStyle.Fill, Text = "127.0.0.1" };
+            this.rdoHostLocal  = new RadioButton { Text = "Local only",       AutoSize = true, Checked = true, Margin = new Padding(0, 2, 14, 0) };
+            this.rdoHostAll    = new RadioButton { Text = "All",         AutoSize = true, Margin = new Padding(0, 2, 14, 0) };
+            this.rdoHostCustom = new RadioButton { Text = "Custom",          AutoSize = true, Margin = new Padding(0, 2, 6,  0) };
+            this.txtHostCustom = new TextBox     { Width = 140, Visible = false, Margin = new Padding(0, 1, 0, 0) };
             this.nudPort         = new NumericUpDown { Dock = DockStyle.Fill, Minimum = 1,  Maximum = 65535, Value = 8080  };
             this.chkThreadsAuto  = new CheckBox { Text = "Auto", AutoSize = true, Checked = true, Margin = new Padding(0, 2, 8, 0) };
             this.nudThreads      = new NumericUpDown { Minimum = 1, Maximum = 256, Value = 4, Width = 60, Visible = false };
@@ -144,12 +154,31 @@ namespace LlamaServerLauncher
 
             // ── MODEL TAB ──────────────────────────────────────────────────
             var tlpModelRow = MakeRow2(this.cbModel, this.btnBrowse, 34);
-            var tlpModel = MakeTlp(5);
+            var tlpModel = MakeTlp(6);
 
-            tlpModel.RowStyles[3] = new RowStyle(SizeType.Absolute, 160F);  // HW side-by-side panel
-            tlpModel.RowStyles[4] = new RowStyle(SizeType.Absolute, 110F);  // Context graph
+            tlpModel.RowStyles[4] = new RowStyle(SizeType.Absolute, 160F);  // HW side-by-side panel
+            tlpModel.RowStyles[5] = new RowStyle(SizeType.Absolute, 110F);  // Context graph
 
             AddRow(tlpModel, 0, MakeLbl("Model File"), tlpModelRow, "The .gguf model file to load and serve.");
+
+            var tlpMmprojRow = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1,
+                Margin = new Padding(0), AutoSize = true
+            };
+            tlpMmprojRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 30F));
+            tlpMmprojRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            tlpMmprojRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 34F));
+            tlpMmprojRow.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            tlpMmprojRow.Controls.Add(this.chkMmproj,       0, 0);
+            tlpMmprojRow.Controls.Add(this.txtMmprojPath,   1, 0);
+            tlpMmprojRow.Controls.Add(this.btnBrowseMmproj, 2, 0);
+            this.chkMmproj.CheckedChanged += (_, _) =>
+            {
+                this.txtMmprojPath.Enabled   = this.chkMmproj.Checked;
+                this.btnBrowseMmproj.Enabled = this.chkMmproj.Checked;
+            };
+            AddRow(tlpModel, 1, MakeLbl("Image Input  (--mmproj)"), tlpMmprojRow, "Load a multimodal projector (.gguf) to enable image/vision input.\nRequired for vision-capable models such as LLaVA or Qwen-VL.\n(--mmproj)");
 
             // ── 2-column performance settings (row 1) ────────────────────
             var tlpPerfCols = new TableLayoutPanel
@@ -198,11 +227,11 @@ namespace LlamaServerLauncher
 
             tlpPerfCols.Controls.Add(tlpPerfL, 0, 0);
             tlpPerfCols.Controls.Add(tlpPerfR, 1, 0);
-            Span3(tlpModel, tlpPerfCols, 0, 1);
+            Span3(tlpModel, tlpPerfCols, 0, 2);
 
-            // ── Hardware heading (row 2) ──────────────────────────────────
+            // ── Hardware heading (row 3) ──────────────────────────────────
             var lblHwSep = new Label { Text = "Hardware", AutoSize = false, Dock = DockStyle.Fill, ForeColor = System.Drawing.Color.Gray, Font = new Font(Font, FontStyle.Bold), Margin = new Padding(2, 6, 2, 6) };
-            Span3(tlpModel, lblHwSep, 0, 2);
+            Span3(tlpModel, lblHwSep, 0, 3);
 
             // ── CPU/RAM dual-graph panel ──────────────────────────────────
             var tlpCpuGraphs = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(0) };
@@ -259,10 +288,10 @@ namespace LlamaServerLauncher
             tlpHwCols.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             tlpHwCols.Controls.Add(tlpCpuCol, 0, 0);
             tlpHwCols.Controls.Add(tlpGpuCol, 1, 0);
-            Span3(tlpModel, tlpHwCols, 0, 3);
+            Span3(tlpModel, tlpHwCols, 0, 4);
 
-            // ── Context graph (row 4) ─────────────────────────────────────
-            Span3(tlpModel, this.graphCtx, 0, 4);
+            // ── Context graph (row 5) ─────────────────────────────────────
+            Span3(tlpModel, this.graphCtx, 0, 5);
 
             // ── Performance tips — pinned to the bottom of the tab (always visible)
             this.rtbTips = new RichTextBox
@@ -294,7 +323,13 @@ namespace LlamaServerLauncher
 
             // ── SERVER TAB ────────────────────────────────────────────────
             var tlpServer = MakeTlp(3);
-            AddRow(tlpServer, 0, MakeLbl("Host  (--host)"),   this.txtHost,  "IP address to listen on (default: 127.0.0.1).\n127.0.0.1 = local only.\n0.0.0.0 = accept from any interface. (--host)");
+            var pnlHost = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+            pnlHost.Controls.Add(this.rdoHostLocal);
+            pnlHost.Controls.Add(this.rdoHostAll);
+            pnlHost.Controls.Add(this.rdoHostCustom);
+            pnlHost.Controls.Add(this.txtHostCustom);
+            this.rdoHostCustom.CheckedChanged += (_, _) => this.txtHostCustom.Visible = this.rdoHostCustom.Checked;
+            AddRow(tlpServer, 0, MakeLbl("Allow connect (--host)"), pnlHost, "IP address to listen on (default: 127.0.0.1).\n127.0.0.1 = local only.\n0.0.0.0 = accept from any interface. (--host)");
             AddRow(tlpServer, 1, MakeLbl("Port  (--port)"),   this.nudPort,  "TCP port for the HTTP API. Default: 8080. (--port)");
             AddRow(tlpServer, 2, MakeLbl("Tools  (--tools)"), this.txtTools, "Built-in tools available to AI agents.\nUse 'all' to enable everything, or a comma-separated list.\nLeave blank to disable. (--tools)");
             this.tabServer.Controls.Add(Scrollable(tlpServer));
@@ -517,19 +552,22 @@ namespace LlamaServerLauncher
             this.tlpMain.Controls.Add(tlpButtons,         0, 2);
 
             // ── Event handlers ────────────────────────────────────────────
-            this.btnLaunch.Click    += btnLaunch_Click;
-            this.btnOpenChat.Click  += btnOpenChat_Click;
-            this.btnBrowse.Click    += btnBrowse_Click;
-            this.btnBrowseExe.Click += btnBrowseExe_Click;
+            this.btnLaunch.Click       += btnLaunch_Click;
+            this.btnOpenChat.Click     += btnOpenChat_Click;
+            this.btnBrowse.Click       += btnBrowse_Click;
+            this.btnBrowseExe.Click    += btnBrowseExe_Click;
+            this.btnBrowseMmproj.Click += btnBrowseMmproj_Click;
 
             void refreshPreview(object s, System.EventArgs e) => UpdateCommandPreview();
             foreach (var n in new NumericUpDown[] { nudGpuLayers, nudCtxSize, nudPort, nudThreads, nudParallel, nudBatchSize, nudUBatchSize, nudTemperature, nudTopK, nudTopP, nudMinP, nudSeed, nudRepeatPenalty })
                 n.ValueChanged += refreshPreview;
-            foreach (var c in new CheckBox[] { chkFlashAttn, chkContBatching, chkMmap, chkMlock, chkEmbedding, chkRerank, chkMetrics, chkThreadsAuto, chkCtxDefault, chkSeedRandom })
+            foreach (var c in new CheckBox[] { chkFlashAttn, chkContBatching, chkMmap, chkMlock, chkEmbedding, chkRerank, chkMetrics, chkThreadsAuto, chkCtxDefault, chkSeedRandom, chkMmproj })
                 c.CheckedChanged += refreshPreview;
             foreach (var c in new ComboBox[] { cbModel, cbCacheK, cbCacheV, cbReasoning, cbNglMode })
                 c.SelectedIndexChanged += refreshPreview;
-            foreach (var t in new TextBox[] { txtHost, txtTools, txtApiKey, txtExtraArgs, txtExePath })
+            foreach (var r in new RadioButton[] { rdoHostLocal, rdoHostAll, rdoHostCustom })
+                r.CheckedChanged += refreshPreview;
+            foreach (var t in new TextBox[] { txtHostCustom, txtTools, txtApiKey, txtExtraArgs, txtExePath })
                 t.TextChanged += refreshPreview;
 
             // ── Form ──────────────────────────────────────────────────────
