@@ -362,51 +362,118 @@ namespace LlamaServerLauncher
             {
                 if (e.Node == null) { e.DrawDefault = true; return; }
 
-                string text = e.Node.Text;
-                int    sep  = text.LastIndexOf("  (");
-                bool hasTps = sep >= 0 && text.EndsWith(" t/s)");
-
-                if (!hasTps) { e.DrawDefault = true; return; }
-
                 bool selected = (e.State & TreeNodeStates.Selected) != 0;
                 var  font     = e.Node.NodeFont ?? this.treePerf.Font;
 
-                using var bgBrush = new SolidBrush(selected ? Color.FromArgb(40, 70, 40) : this.treePerf.BackColor);
-                e.Graphics.FillRectangle(bgBrush, e.Bounds);
+                // ── Config nodes (level 1): main text | current-settings marker | load hint ──
+                if (e.Node.Level == 1)
+                {
+                    using var bgBrush = new SolidBrush(selected ? Color.FromArgb(40, 70, 40) : this.treePerf.BackColor);
+                    e.Graphics.FillRectangle(bgBrush, e.Bounds);
 
-                string namePart = text.Substring(0, sep);
-                string tpsPart  = text.Substring(sep);
-                var nameColor   = selected ? Color.White : e.Node.ForeColor;
-                var tpsColor    = selected ? Color.LightYellow : Color.FromArgb(255, 200, 0);
+                    const string currentMarker = "  <- current settings";
+                    string nodeText   = e.Node.Text;
+                    bool hasCurrent   = nodeText.EndsWith(currentMarker);
+                    string mainText   = hasCurrent ? nodeText[..^currentMarker.Length] : nodeText;
+                    var    mainColor  = selected ? Color.White : e.Node.ForeColor;
+
+                    int cx = e.Bounds.Left;
+
+                    int mainW = TextRenderer.MeasureText(e.Graphics, mainText, font, Size.Empty, TextFormatFlags.NoPadding).Width;
+                    TextRenderer.DrawText(e.Graphics, mainText, font,
+                        new Rectangle(cx, e.Bounds.Top, mainW, e.Bounds.Height),
+                        mainColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                    cx += mainW;
+
+                    if (hasCurrent)
+                    {
+                        int markerW = TextRenderer.MeasureText(e.Graphics, currentMarker, font, Size.Empty, TextFormatFlags.NoPadding).Width;
+                        TextRenderer.DrawText(e.Graphics, currentMarker, font,
+                            new Rectangle(cx, e.Bounds.Top, markerW, e.Bounds.Height),
+                            Color.White, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                        cx += markerW;
+                    }
+
+                    const string loadHint = "  [load settings]";
+                    int hintW = TextRenderer.MeasureText(e.Graphics, loadHint, font, Size.Empty, TextFormatFlags.NoPadding).Width;
+                    TextRenderer.DrawText(e.Graphics, loadHint, font,
+                        new Rectangle(cx, e.Bounds.Top, hintW, e.Bounds.Height),
+                        Color.FromArgb(80, 160, 220), TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                    return;
+                }
+
+                // ── Model nodes: name (green) | t/s (yellow) | active marker (white) ──
+                const string loadedMarker = "  <- currently loaded model";
+                string text      = e.Node.Text;
+                bool hasLoaded   = text.EndsWith(loadedMarker);
+                string baseText  = hasLoaded ? text[..^loadedMarker.Length] : text;
+                int    sep       = baseText.LastIndexOf("  (");
+                bool   hasTps    = sep >= 0 && baseText.EndsWith(" t/s)");
+
+                if (!hasTps && !hasLoaded) { e.DrawDefault = true; return; }
+
+                using var bgBrush2 = new SolidBrush(selected ? Color.FromArgb(40, 70, 40) : this.treePerf.BackColor);
+                e.Graphics.FillRectangle(bgBrush2, e.Bounds);
+
+                string namePart  = hasTps ? baseText[..sep] : baseText;
+                string tpsPart   = hasTps ? baseText[sep..] : "";
+                var    nameColor = selected ? Color.White : e.Node.ForeColor;
+                var    tpsColor  = selected ? Color.LightYellow : Color.FromArgb(255, 200, 0);
+
+                int x = e.Bounds.Left;
 
                 int nameW = TextRenderer.MeasureText(e.Graphics, namePart, font, Size.Empty, TextFormatFlags.NoPadding).Width;
                 TextRenderer.DrawText(e.Graphics, namePart, font,
-                    new Rectangle(e.Bounds.Left, e.Bounds.Top, nameW, e.Bounds.Height),
+                    new Rectangle(x, e.Bounds.Top, nameW, e.Bounds.Height),
                     nameColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
-                TextRenderer.DrawText(e.Graphics, tpsPart, font,
-                    new Rectangle(e.Bounds.Left + nameW, e.Bounds.Top, e.Bounds.Width - nameW, e.Bounds.Height),
-                    tpsColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                x += nameW;
+
+                if (hasTps)
+                {
+                    int tpsW = TextRenderer.MeasureText(e.Graphics, tpsPart, font, Size.Empty, TextFormatFlags.NoPadding).Width;
+                    TextRenderer.DrawText(e.Graphics, tpsPart, font,
+                        new Rectangle(x, e.Bounds.Top, tpsW, e.Bounds.Height),
+                        tpsColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                    x += tpsW;
+                }
+
+                if (hasLoaded)
+                {
+                    TextRenderer.DrawText(e.Graphics, loadedMarker, font,
+                        new Rectangle(x, e.Bounds.Top, e.Bounds.Width - (x - e.Bounds.Left), e.Bounds.Height),
+                        Color.White, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                }
             };
-            this.treePerf.DoubleClick += (_, _) => LoadSelectedPerfConfig();
+            this.treePerf.NodeMouseClick += (_, e) =>
+            {
+                if (e.Node?.Level != 1) return;
+                using var g = this.treePerf.CreateGraphics();
+                var font  = e.Node.NodeFont ?? this.treePerf.Font;
+                int mainW = TextRenderer.MeasureText(g, e.Node.Text, font, Size.Empty, TextFormatFlags.NoPadding).Width;
+                if (e.X >= e.Node.Bounds.Left + mainW)
+                {
+                    this.treePerf.SelectedNode = e.Node;
+                    LoadSelectedPerfConfig();
+                }
+            };
             this.treePerf.MouseMove += (_, e) =>
             {
                 var node = this.treePerf.GetNodeAt(e.X, e.Y);
-                this.treePerf.Cursor = node?.Tag is PerfConfigItem ? Cursors.Hand : Cursors.Default;
+                bool hand = false;
+                if (node?.Level == 1)
+                {
+                    using var g = this.treePerf.CreateGraphics();
+                    var font  = node.NodeFont ?? this.treePerf.Font;
+                    int mainW = TextRenderer.MeasureText(g, node.Text, font, Size.Empty, TextFormatFlags.NoPadding).Width;
+                    hand = e.X >= node.Bounds.Left + mainW;
+                }
+                this.treePerf.Cursor = hand ? Cursors.Hand : Cursors.Default;
             };
             this.treePerf.MouseLeave += (_, _) => this.treePerf.Cursor = Cursors.Default;
 
             this.btnClearPerf = new Button { Text = "Clear Log", Dock = DockStyle.Right, Width = 90 };
             this.btnClearPerf.Click += btnClearPerf_Click;
-            var lblPerfHint = new Label
-            {
-                Text = "Double-click a result row (hand cursor) to load its settings",
-                Dock = DockStyle.Fill,
-                TextAlign = System.Drawing.ContentAlignment.MiddleLeft,
-                ForeColor = System.Drawing.Color.DimGray,
-                Padding = new Padding(6, 0, 0, 0)
-            };
             var pnlPerfBottom = new Panel { Dock = DockStyle.Bottom, Height = 34 };
-            pnlPerfBottom.Controls.Add(lblPerfHint);
             pnlPerfBottom.Controls.Add(this.btnClearPerf);
 
             this.tabPerf.Controls.Add(this.treePerf);

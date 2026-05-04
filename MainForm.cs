@@ -34,8 +34,11 @@ namespace LlamaServerLauncher
         // Last-known metric snapshot (updated each monitor tick)
         private float _lastCpu = -1, _lastGpuPct = -1, _lastVramGb = -1;
 
-        // Context usage — populated by parsing log output
+        // Context usage — populated by /slots API polling (log parsing used as fallback on startup)
         private volatile int _ctxMax, _ctxCurrent;
+        private volatile bool _pollingSlotsInProgress;
+        private volatile bool _serverReady;
+        private static readonly System.Net.Http.HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(1) };
 
         // Server log file (written in real-time; rtbLog is populated on-demand when tab is shown)
         private readonly string _logFilePath = "server_log.txt";
@@ -298,10 +301,11 @@ namespace LlamaServerLauncher
                 _logViewRenderedBytes = -1;
                 _ctxMax = 0;
                 _ctxCurrent = 0;
+                _serverReady = false;
 
                 AppendLog($"--- started: {txtExePath.Text} ---", isError: false);
                 UpdatePerformanceTips();
-                lblStatus.Text = "Running…";
+                lblStatus.Text = "Starting…";
                 btnLaunch.Text = "Stop Server";
                 btnOpenChat.Enabled = true;
             }
@@ -535,6 +539,11 @@ namespace LlamaServerLauncher
             catch { graphVram.AddSample(0, "N/A"); }
 
             // ── Context ───────────────────────────────────────────────────
+            bool serverRunning = false;
+            try { serverRunning = _proc != null && !_proc.HasExited; } catch { }
+            if (serverRunning && !_pollingSlotsInProgress)
+                Task.Run(() => PollSlotsAsync((int)nudPort.Value));
+
             int ctxMax = _ctxMax, ctxCur = _ctxCurrent;
             graphCtx.AddSample(
                 ctxMax > 0 ? ctxCur * 100f / ctxMax : 0,
@@ -558,8 +567,30 @@ namespace LlamaServerLauncher
             if (_monitorTick % 3 == 0) UpdatePerformanceTips();
         }
 
-        private static readonly Regex _rxCtxMax  = new(@"\bn_ctx\b\s*=\s*(\d+)",  RegexOptions.Compiled);
-        private static readonly Regex _rxNPast   = new(@"\bn_past\b\s*=\s*(\d+)", RegexOptions.Compiled);
+        private static readonly Regex _rxCtxMax   = new(@"\bn_ctx\b\s*=\s*(\d+)",     RegexOptions.Compiled);
+        // Matches "n_tokens = N" but not "task.n_tokens" or "batch.n_tokens"
+        private static readonly Regex _rxNTokens  = new(@"(?<![.\w])n_tokens\s*=\s*(\d+)", RegexOptions.Compiled);
+
+        private async Task PollSlotsAsync(int port)
+        {
+            _pollingSlotsInProgress = true;
+            try
+            {
+                var json = await _http.GetStringAsync($"http://localhost:{port}/slots");
+                using var doc = JsonDocument.Parse(json);
+                int nPast = 0, nCtx = 0;
+                foreach (var slot in doc.RootElement.EnumerateArray())
+                {
+                    if (slot.TryGetProperty("n_past", out var p)) nPast = Math.Max(nPast, p.GetInt32());
+                    if (slot.TryGetProperty("n_ctx",  out var c)) nCtx  = Math.Max(nCtx,  c.GetInt32());
+                }
+                if (nCtx  > 0) _ctxMax = nCtx;
+                // Only advance; keeps last value when slots are idle between requests
+                if (nPast > 0) _ctxCurrent = nPast;
+            }
+            catch { }
+            finally { _pollingSlotsInProgress = false; }
+        }
 
         private void LoadConfig()
         {
@@ -657,6 +688,20 @@ namespace LlamaServerLauncher
 
         private void AppendLog(string text, bool isError)
         {
+            // Suppress noisy internal server status lines
+            if (text.Contains("GET /slots") || text.Contains("all slots are idle")) return;
+
+            // Detect when the server finishes loading and is ready to serve
+            if (!_serverReady && (text.Contains("server is listening") || text.Contains("all slots are ready")))
+            {
+                _serverReady = true;
+                this.BeginInvoke(new Action(() =>
+                {
+                    lblStatus.Text      = "Running…";
+                    lblStatus.ForeColor = System.Drawing.SystemColors.ControlText;
+                }));
+            }
+
             // Parse context size from startup line, e.g. "n_ctx = 4096"
             if (text.Contains("n_ctx") && !text.Contains("n_ctx_train"))
             {
@@ -665,11 +710,12 @@ namespace LlamaServerLauncher
                     _ctxMax = v;
             }
 
-            // Parse current position from slot lines, e.g. "n_past = 512"
-            if (text.Contains("n_past"))
+            // Parse current token count from slot progress/release lines
+            // e.g. "prompt processing progress, n_tokens = 2048" or "stop processing: n_tokens = 16484"
+            if (text.Contains("n_tokens") && (text.Contains("prompt processing") || text.Contains("stop processing:")))
             {
-                var m = _rxNPast.Match(text);
-                if (m.Success && int.TryParse(m.Groups[1].Value, out int v))
+                var m = _rxNTokens.Match(text);
+                if (m.Success && int.TryParse(m.Groups[1].Value, out int v) && v > 0)
                     _ctxCurrent = v;
             }
 
@@ -1039,14 +1085,14 @@ namespace LlamaServerLauncher
                     .OrderByDescending(x => x.GenAvg)
                     .ToList();
 
-                double bestTps  = byConfig.Count > 0 ? byConfig.Max(c => c.GenAvg) : -1;
+                double bestTps   = byConfig.Count > 0 ? byConfig.Max(c => c.GenAvg) : -1;
+                bool isActive    = serverRunningForHighlight && _sessionModel == modelGroup.Key;
                 string tpsSuffix = bestTps >= 0 ? $"  ({bestTps:F1} t/s)" : "";
-                bool isActive   = serverRunningForHighlight && _sessionModel == modelGroup.Key;
-                string prefix   = isActive ? "> " : "";
+                string suffix    = tpsSuffix + (isActive ? "  <- currently loaded model" : "");
 
-                var modelNode = new TreeNode($"{prefix}{modelGroup.Key}{tpsSuffix}")
+                var modelNode = new TreeNode($"{modelGroup.Key}{suffix}")
                 {
-                    ForeColor = isActive ? System.Drawing.Color.White : green,
+                    ForeColor = green,
                     NodeFont  = boldFont
                 };
                 treePerf.Nodes.Add(modelNode);
@@ -1059,7 +1105,9 @@ namespace LlamaServerLauncher
                     string star       = isBest ? "★ " : "  ";
                     string tpsPart    = GenAvg >= 0 ? $"{GenAvg:F1} t/s avg" : "no data";
                     string countPart  = Runs.Count == 1 ? "1 run" : $"{Runs.Count} runs";
-                    string configText = $"{star}{tpsPart}  ({countPart})   {ArgsLabel}";
+                    bool isCurrentConfig = isActive && ArgsLabel == StripModelArg(_sessionArgs ?? "");
+                    string configText = $"{star}{tpsPart}  ({countPart})   {ArgsLabel}"
+                                      + (isCurrentConfig ? "  <- current settings" : "");
 
                     var configNode = new TreeNode(configText)
                     {
