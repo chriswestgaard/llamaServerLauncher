@@ -37,3 +37,6 @@ BundleArtifacts/
 # Claude Code
 .claude/
 claude.md
+
+# Configuration files
+config.json

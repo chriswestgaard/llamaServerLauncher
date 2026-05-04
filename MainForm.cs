@@ -19,6 +19,7 @@ namespace LlamaServerLauncher
         private string _modelFolder;
         private string _savedModel = "";
         private string _mmprojPath = "";
+        private int _modelLayerCount = 0;
         private Process _proc;
 
         // Hardware monitor
@@ -67,6 +68,12 @@ namespace LlamaServerLauncher
         public MainForm()
         {
             InitializeComponent();
+            cbModel.SelectedIndexChanged += (_, _) => _ = UpdateModelMetaAsync();
+            cbNglMode.SelectedIndexChanged += (_, _) =>
+            {
+                if (cbNglMode.SelectedIndex == 3 && _modelLayerCount > 0)
+                    nudGpuLayers.Value = Math.Min(_modelLayerCount, (int)nudGpuLayers.Maximum);
+            };
             FormClosed += (_, _) => { lock (_logLock) { _logWriter?.Dispose(); _logWriter = null; } };
             LoadConfig();
             if (string.IsNullOrEmpty(txtExePath.Text))
@@ -914,6 +921,95 @@ namespace LlamaServerLauncher
                 catch { }
             }
             return exeName; // let the OS resolve it at launch time
+        }
+
+        private async Task UpdateModelMetaAsync()
+        {
+            if (cbModel.SelectedItem == null || string.IsNullOrEmpty(_modelFolder))
+            {
+                lblCtxSize.Text    = "";
+                lblLayerCount.Text = "";
+                return;
+            }
+            string path = Path.Combine(_modelFolder, cbModel.SelectedItem.ToString() + ".gguf");
+            var (ctx, layers) = await Task.Run(() => ReadGgufMeta(path));
+            _modelLayerCount  = layers > 0 ? (int)layers : 0;
+            lblCtxSize.Text   = ctx    > 0 ? $"({ctx:N0})"       : "";
+            lblLayerCount.Text = layers > 0 ? $"({layers} layers)" : "";
+        }
+
+        private static (long Ctx, long Layers) ReadGgufMeta(string path)
+        {
+            long ctx = -1, layers = -1;
+            try
+            {
+                using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 65536);
+                using var br = new BinaryReader(fs);
+
+                if (br.ReadUInt32() != 0x46554747u) return (-1, -1);  // 'GGUF' magic
+                uint version = br.ReadUInt32();
+                if (version < 1 || version > 3) return (-1, -1);
+
+                bool v1 = version == 1;
+                _ = v1 ? br.ReadUInt32() : br.ReadUInt64();  // n_tensors (unused)
+                ulong nKv = v1 ? br.ReadUInt32() : br.ReadUInt64();
+
+                for (ulong i = 0; i < nKv; i++)
+                {
+                    string key = ReadGgufString(br, v1);
+                    uint   vt  = br.ReadUInt32();
+
+                    bool isCtx    = key.EndsWith(".context_length", StringComparison.Ordinal);
+                    bool isLayers = key.EndsWith(".block_count",    StringComparison.Ordinal);
+
+                    if (isCtx || isLayers)
+                    {
+                        long val = vt switch
+                        {
+                            4  => br.ReadUInt32(),
+                            5  => br.ReadInt32(),
+                            10 => (long)br.ReadUInt64(),
+                            11 => br.ReadInt64(),
+                            _  => -1L
+                        };
+                        if (isCtx)    ctx    = val;
+                        if (isLayers) layers = val;
+                        if (ctx > 0 && layers > 0) break;
+                        continue;
+                    }
+
+                    SkipGgufValue(br, vt, v1);
+                }
+            }
+            catch { }
+            return (ctx, layers);
+        }
+
+        private static string ReadGgufString(BinaryReader br, bool v1)
+        {
+            int len = (int)Math.Min(v1 ? (ulong)br.ReadUInt32() : br.ReadUInt64(), 4096UL);
+            return System.Text.Encoding.UTF8.GetString(br.ReadBytes(len));
+        }
+
+        private static void SkipGgufValue(BinaryReader br, uint vt, bool v1)
+        {
+            switch (vt)
+            {
+                case 0: case 1: case 7: br.ReadByte(); break;
+                case 2: case 3: br.BaseStream.Seek(2, SeekOrigin.Current); break;
+                case 4: case 5: case 6: br.BaseStream.Seek(4, SeekOrigin.Current); break;
+                case 8:
+                    br.BaseStream.Seek((long)(v1 ? br.ReadUInt32() : br.ReadUInt64()), SeekOrigin.Current);
+                    break;
+                case 9:
+                    uint et  = br.ReadUInt32();
+                    long cnt = (long)(v1 ? br.ReadUInt32() : br.ReadUInt64());
+                    int esz  = et switch { 0 or 1 or 7 => 1, 2 or 3 => 2, 4 or 5 or 6 => 4, 10 or 11 or 12 => 8, _ => 0 };
+                    if (esz > 0) br.BaseStream.Seek(cnt * esz, SeekOrigin.Current);
+                    else for (long j = 0; j < cnt; j++) SkipGgufValue(br, et, v1);
+                    break;
+                case 10: case 11: case 12: br.BaseStream.Seek(8, SeekOrigin.Current); break;
+            }
         }
 
         private void UpdatePerformanceTips()

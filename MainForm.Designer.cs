@@ -28,6 +28,7 @@ namespace LlamaServerLauncher
         private TextBox txtMmprojPath;
         private Button btnBrowseMmproj;
         private NumericUpDown nudGpuLayers, nudCtxSize;
+        private Label lblLayerCount, lblCtxSize;
         private ComboBox cbNglMode;
         private CheckBox chkThreadsAuto, chkCtxDefault, chkSeedRandom;
         private TextBox txtCpuInfo, txtGpuInfo;
@@ -93,8 +94,10 @@ namespace LlamaServerLauncher
             this.cbNglMode.Items.AddRange(new[] { "Auto", "CPU only", "GPU only", "Custom" });
             this.cbNglMode.SelectedIndex = 0;
             this.nudGpuLayers    = new NumericUpDown { Minimum = 1, Maximum = 998, Value = 32, Width = 60, Visible = false };
-            this.chkCtxDefault   = new CheckBox { Text = "Model default", AutoSize = true, Checked = true, Margin = new Padding(0, 2, 8, 0) };
-            this.nudCtxSize      = new NumericUpDown { Minimum = 512, Maximum = 131072, Value = 4096, Increment = 1024, AutoSize = false, MinimumSize = new Size(120, 24), Visible = false };
+            this.lblLayerCount   = new Label { AutoSize = true, ForeColor = System.Drawing.Color.DimGray, Margin = new Padding(8, 4, 0, 0), Text = "" };
+            this.chkCtxDefault   = new CheckBox { Text = "Model default", AutoSize = true, Checked = true, Margin = new Padding(0, 2, 12, 0) };
+            this.lblCtxSize      = new Label { AutoSize = true, ForeColor = System.Drawing.Color.DimGray, Margin = new Padding(0, 4, 0, 0), Text = "" };
+            this.nudCtxSize      = new NumericUpDown { Minimum = 512, Maximum = 10000000, Value = 4096, Increment = 1024, Dock = DockStyle.Fill, Visible = false, TextAlign = HorizontalAlignment.Right };
             this.txtCpuInfo      = new TextBox { ReadOnly = true, Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, BackColor = System.Drawing.SystemColors.Control, ForeColor = System.Drawing.Color.DimGray, TabStop = false };
             this.txtGpuInfo      = new TextBox { ReadOnly = true, Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, BackColor = System.Drawing.SystemColors.Control, ForeColor = System.Drawing.Color.DimGray, TabStop = false };
             this.graphCpu  = new UsageGraph { Dock = DockStyle.Fill, Title = "CPU",     GraphColor = Color.FromArgb( 19, 194,  56), Margin = new Padding(0, 2, 2, 0) };
@@ -192,21 +195,32 @@ namespace LlamaServerLauncher
             tlpPerfCols.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
             var tlpPerfL = MakeTlp(7);
+
             var pnlNgl = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
             pnlNgl.Controls.Add(this.cbNglMode);
             pnlNgl.Controls.Add(this.nudGpuLayers);
+            pnlNgl.Controls.Add(this.lblLayerCount);
             this.cbNglMode.SelectedIndexChanged += (_, _) => this.nudGpuLayers.Visible = this.cbNglMode.SelectedIndex == 3;
             AddRow(tlpPerfL, 0, MakeLbl("GPU Layers  (-ngl)"),  pnlNgl, "Number of model layers to offload to GPU VRAM.\nAuto  = server decides at startup.\nCPU only  = no GPU offload.\nGPU only  = all layers (passes -ngl 999).\nCustom  = specify exact layer count. (-ngl)");
 
-            var pnlCtx = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
-            pnlCtx.Controls.Add(this.chkCtxDefault);
-            pnlCtx.Controls.Add(this.nudCtxSize);
-            pnlCtx.Controls[1].AutoSize = false;
-            pnlCtx.Controls[1].MinimumSize = new Size(120, 24);
-            pnlCtx.Controls[1].MaximumSize = new Size(150, 24);
-            pnlCtx.Controls[1].Width = 150;
-            this.chkCtxDefault.CheckedChanged += (_, _) => this.nudCtxSize.Visible = !this.chkCtxDefault.Checked;
-            AddRow(tlpPerfL, 1, MakeLbl("Context Size  (-c)"),  pnlCtx, "Maximum number of tokens in the context window.\n\"Model default\" uses the value embedded in the model file.\nLarger contexts require more VRAM/RAM. (-c)");
+            var tlpCtx = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1,
+                Margin = new Padding(0), AutoSize = true, MinimumSize = new Size(0, 26)
+            };
+            tlpCtx.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));      // checkbox
+            tlpCtx.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));      // model-default label
+            tlpCtx.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F)); // spinner (fills)
+            tlpCtx.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            tlpCtx.Controls.Add(this.chkCtxDefault, 0, 0);
+            tlpCtx.Controls.Add(this.lblCtxSize,    1, 0);
+            tlpCtx.Controls.Add(this.nudCtxSize,    2, 0);
+            this.chkCtxDefault.CheckedChanged += (_, _) =>
+            {
+                this.lblCtxSize.Visible = this.chkCtxDefault.Checked;
+                this.nudCtxSize.Visible = !this.chkCtxDefault.Checked;
+            };
+            AddRow(tlpPerfL, 1, MakeLbl("Context Size  (-c)"), tlpCtx, "Maximum number of tokens in the context window.\n\"Model default\" uses the value embedded in the model file.\nLarger contexts require more VRAM/RAM. (-c)");
             AddRow(tlpPerfL, 2, MakeLbl("Batch Size  (-b)"),     this.nudBatchSize,  "Logical maximum batch size (default: 2048).\nLarger values improve prompt-processing throughput. (-b)");
             AddRow(tlpPerfL, 3, MakeLbl("UBatch Size  (-ub)"),   this.nudUBatchSize, "Physical maximum batch size (default: 512).\nSmaller values reduce peak VRAM usage. (-ub)");
             AddRow(tlpPerfL, 4, MakeLbl("Cache Type K  (-ctk)"), this.cbCacheK,      "KV cache data type for Keys (default: f16).\nAllowed: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1.\nbf16 / q8_0 saves VRAM with minor quality loss. (-ctk)");
@@ -433,11 +447,14 @@ namespace LlamaServerLauncher
                         cx += markerW;
                     }
 
-                    const string loadHint = "  [load settings]";
-                    int hintW = TextRenderer.MeasureText(e.Graphics, loadHint, font, Size.Empty, TextFormatFlags.NoPadding).Width;
-                    TextRenderer.DrawText(e.Graphics, loadHint, font,
-                        new Rectangle(cx, e.Bounds.Top, hintW, e.Bounds.Height),
-                        Color.FromArgb(80, 160, 220), TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                    if (!hasCurrent)
+                    {
+                        const string loadHint = "  [load settings]";
+                        int hintW = TextRenderer.MeasureText(e.Graphics, loadHint, font, Size.Empty, TextFormatFlags.NoPadding).Width;
+                        TextRenderer.DrawText(e.Graphics, loadHint, font,
+                            new Rectangle(cx, e.Bounds.Top, hintW, e.Bounds.Height),
+                            Color.FromArgb(80, 160, 220), TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                    }
                     return;
                 }
 
@@ -486,6 +503,7 @@ namespace LlamaServerLauncher
             this.treePerf.NodeMouseClick += (_, e) =>
             {
                 if (e.Node?.Level != 1) return;
+                if (e.Node.Text.EndsWith("  <- current settings")) return;
                 using var g = this.treePerf.CreateGraphics();
                 var font  = e.Node.NodeFont ?? this.treePerf.Font;
                 int mainW = TextRenderer.MeasureText(g, e.Node.Text, font, Size.Empty, TextFormatFlags.NoPadding).Width;
@@ -499,7 +517,7 @@ namespace LlamaServerLauncher
             {
                 var node = this.treePerf.GetNodeAt(e.X, e.Y);
                 bool hand = false;
-                if (node?.Level == 1)
+                if (node?.Level == 1 && !node.Text.EndsWith("  <- current settings"))
                 {
                     using var g = this.treePerf.CreateGraphics();
                     var font  = node.NodeFont ?? this.treePerf.Font;
@@ -571,8 +589,8 @@ namespace LlamaServerLauncher
                 t.TextChanged += refreshPreview;
 
             // ── Form ──────────────────────────────────────────────────────
-            this.ClientSize   = new Size(1200, 1024);
-            this.MinimumSize  = new Size(1000, 720);
+            this.ClientSize   = new Size(1320, 1024);
+            this.MinimumSize  = new Size(1100, 720);
             this.Controls.Add(this.tlpMain);
             this.FormBorderStyle = FormBorderStyle.Sizable;
             this.StartPosition   = FormStartPosition.CenterScreen;
