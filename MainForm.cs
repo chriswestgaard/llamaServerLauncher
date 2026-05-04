@@ -676,10 +676,10 @@ namespace LlamaServerLauncher
                 Seed           = nudSeed.Value,
                 RepeatPenalty  = nudRepeatPenalty.Value,
                 ApiKey         = txtApiKey.Text,
-                Embedding      = chkEmbedding.Checked,
-                Rerank         = chkRerank.Checked,
-                Metrics        = chkMetrics.Checked,
-                ExtraArgs      = txtExtraArgs.Text,
+                Embedding         = chkEmbedding.Checked,
+                Rerank            = chkRerank.Checked,
+                Metrics           = chkMetrics.Checked,
+                ExtraArgs         = txtExtraArgs.Text,
             };
             try { File.WriteAllText(_configPath, JsonSerializer.Serialize(s, _jsonOptsIndented)); } catch { }
         }
@@ -1249,8 +1249,8 @@ namespace LlamaServerLauncher
             public string  ApiKey         { get; set; } = "";
             public bool    Embedding      { get; set; } = false;
             public bool    Rerank         { get; set; } = false;
-            public bool    Metrics        { get; set; } = false;
-            public string  ExtraArgs      { get; set; } = "";
+            public bool    Metrics           { get; set; } = false;
+            public string  ExtraArgs         { get; set; } = "";
         }
 
         private static readonly Regex _rxCtx      = new(@"(?:-c|--ctx-size)\s+(\d+)",       RegexOptions.Compiled);

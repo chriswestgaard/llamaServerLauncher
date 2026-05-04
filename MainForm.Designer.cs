@@ -87,7 +87,7 @@ namespace LlamaServerLauncher
             this.cbNglMode.SelectedIndex = 0;
             this.nudGpuLayers    = new NumericUpDown { Minimum = 1, Maximum = 998, Value = 32, Width = 60, Visible = false };
             this.chkCtxDefault   = new CheckBox { Text = "Model default", AutoSize = true, Checked = true, Margin = new Padding(0, 2, 8, 0) };
-            this.nudCtxSize      = new NumericUpDown { Minimum = 512, Maximum = 131072, Value = 4096, Increment = 1024, Width = 80, Visible = false };
+            this.nudCtxSize      = new NumericUpDown { Minimum = 512, Maximum = 131072, Value = 4096, Increment = 1024, AutoSize = false, MinimumSize = new Size(120, 24), Visible = false };
             this.txtCpuInfo      = new TextBox { ReadOnly = true, Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, BackColor = System.Drawing.SystemColors.Control, ForeColor = System.Drawing.Color.DimGray, TabStop = false };
             this.txtGpuInfo      = new TextBox { ReadOnly = true, Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, BackColor = System.Drawing.SystemColors.Control, ForeColor = System.Drawing.Color.DimGray, TabStop = false };
             this.graphCpu  = new UsageGraph { Dock = DockStyle.Fill, Title = "CPU",     GraphColor = Color.FromArgb( 19, 194,  56), Margin = new Padding(0, 2, 2, 0) };
@@ -172,6 +172,10 @@ namespace LlamaServerLauncher
             var pnlCtx = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
             pnlCtx.Controls.Add(this.chkCtxDefault);
             pnlCtx.Controls.Add(this.nudCtxSize);
+            pnlCtx.Controls[1].AutoSize = false;
+            pnlCtx.Controls[1].MinimumSize = new Size(120, 24);
+            pnlCtx.Controls[1].MaximumSize = new Size(150, 24);
+            pnlCtx.Controls[1].Width = 150;
             this.chkCtxDefault.CheckedChanged += (_, _) => this.nudCtxSize.Visible = !this.chkCtxDefault.Checked;
             AddRow(tlpPerfL, 1, MakeLbl("Context Size  (-c)"),  pnlCtx, "Maximum number of tokens in the context window.\n\"Model default\" uses the value embedded in the model file.\nLarger contexts require more VRAM/RAM. (-c)");
             AddRow(tlpPerfL, 2, MakeLbl("Batch Size  (-b)"),     this.nudBatchSize,  "Logical maximum batch size (default: 2048).\nLarger values improve prompt-processing throughput. (-b)");
