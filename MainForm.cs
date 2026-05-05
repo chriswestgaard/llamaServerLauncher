@@ -7,6 +7,7 @@ using System.Linq;
 using System.Management;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 using System.Text.Json;
@@ -23,7 +24,7 @@ namespace LlamaServerLauncher
         private Process _proc;
 
         // Hardware monitor
-        private Timer _monitorTimer;
+        private System.Windows.Forms.Timer _monitorTimer;
         private PerformanceCounter _cpuCounter;
         private PerformanceCounter _ramAvailCounter;
         private long _totalRamMb;
@@ -35,12 +36,23 @@ namespace LlamaServerLauncher
 
         // Last-known metric snapshot (updated each monitor tick)
         private float _lastCpu = -1, _lastGpuPct = -1, _lastVramGb = -1;
+        private bool _monitorBusy;
 
         // Context usage — populated by /slots API polling (log parsing used as fallback on startup)
         private volatile int _ctxMax, _ctxCurrent;
         private volatile bool _pollingSlotsInProgress;
         private volatile bool _serverReady;
-        private static readonly System.Net.Http.HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(1) };
+        private static readonly System.Net.Http.HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(3) };
+        private static readonly System.Net.Http.HttpClient _inferenceHttp = new() { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
+
+        // Chat
+        private CancellationTokenSource _chatCts;
+        private readonly List<(string Role, string Content)> _chatMessages = new();
+        private System.Windows.Forms.Timer _spinTimer;
+        private int _spinFrame;
+        private volatile int _chatTokenCount;
+        private System.Diagnostics.Stopwatch _chatStopwatch;
+        private static readonly char[] SpinFrames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏".ToCharArray();
 
         // Server log file (written in real-time; rtbLog is populated on-demand when tab is shown)
         private readonly string _logFilePath = "server_log.txt";
@@ -293,6 +305,9 @@ namespace LlamaServerLauncher
                         lblStatus.ForeColor = System.Drawing.SystemColors.ControlText;
                         btnLaunch.Text = "Launch llama-server";
                         btnOpenChat.Enabled = false;
+                        txtChatInput.Enabled = false;
+                        btnSendChat.Enabled = false;
+                        _chatCts?.Cancel();
                         SavePerformanceSession(code);
                         UpdatePerformanceTips();
                     }));
@@ -335,6 +350,115 @@ namespace LlamaServerLauncher
         {
             var url = $"http://localhost:{nudPort.Value}/";
             Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
+        }
+
+        private void EnsureSpinTimer()
+        {
+            if (_spinTimer != null) return;
+            _spinTimer = new System.Windows.Forms.Timer { Interval = 100 };
+            _spinTimer.Tick += (_, _) =>
+            {
+                _spinFrame = (_spinFrame + 1) % SpinFrames.Length;
+                double tps = _chatStopwatch != null && _chatStopwatch.Elapsed.TotalSeconds > 0.1
+                    ? _chatTokenCount / _chatStopwatch.Elapsed.TotalSeconds : 0;
+                lblChatStatus.Text = $"{SpinFrames[_spinFrame]}  {_chatTokenCount} tokens   {tps:F1} t/s";
+            };
+        }
+
+        private async void btnSendChat_Click(object sender, EventArgs e)
+        {
+            var prompt = txtChatInput.Text.Trim();
+            if (string.IsNullOrEmpty(prompt)) return;
+
+            txtChatInput.Clear();
+            _chatMessages.Add(("user", prompt));
+
+            btnSendChat.Enabled   = false;
+            txtChatInput.Enabled  = false;
+            btnCancelChat.Enabled = true;
+            _chatCts = new CancellationTokenSource();
+
+            _chatTokenCount = 0;
+            _chatStopwatch  = System.Diagnostics.Stopwatch.StartNew();
+            EnsureSpinTimer();
+            _spinTimer.Start();
+
+            var sb = new StringBuilder();
+            try
+            {
+                await StreamChatAsync(token => { sb.Append(token); _chatTokenCount++; _ctxCurrent++; }, _chatCts.Token);
+
+                _spinTimer.Stop();
+                _chatStopwatch.Stop();
+                double finalTps = _chatTokenCount > 0 ? _chatTokenCount / _chatStopwatch.Elapsed.TotalSeconds : 0;
+                _chatMessages.Add(("assistant", sb.ToString()));
+                lblChatStatus.Text = $"✓  {_chatTokenCount} tokens   {finalTps:F1} t/s";
+            }
+            catch (OperationCanceledException)
+            {
+                _spinTimer.Stop();
+                _chatMessages.RemoveAt(_chatMessages.Count - 1);
+                lblChatStatus.Text = "— Cancelled";
+            }
+            catch (Exception ex)
+            {
+                _spinTimer.Stop();
+                _chatMessages.RemoveAt(_chatMessages.Count - 1);
+                lblChatStatus.Text = $"✗  {ex.Message}";
+            }
+            finally
+            {
+                btnCancelChat.Enabled = false;
+                if (_serverReady)
+                {
+                    btnSendChat.Enabled  = true;
+                    txtChatInput.Enabled = true;
+                    txtChatInput.Focus();
+                }
+            }
+        }
+
+        private async Task StreamChatAsync(Action<string> onToken, CancellationToken ct)
+        {
+            // Build request on the UI thread (nudPort is a UI control)
+            var messages = _chatMessages
+                .Select(m => new { role = m.Role, content = m.Content })
+                .ToArray();
+            var body = JsonSerializer.Serialize(new { messages, stream = true });
+            var req = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Post,
+                $"http://localhost:{nudPort.Value}/v1/chat/completions")
+            {
+                Content = new System.Net.Http.StringContent(body, Encoding.UTF8, "application/json")
+            };
+
+            // ConfigureAwait(false) on every await keeps all continuations off the UI
+            // thread's SynchronizationContext. Without this, each token arrival posts a
+            // continuation back to the UI message queue, starving it during fast inference.
+            using var resp = await _inferenceHttp.SendAsync(req, System.Net.Http.HttpCompletionOption.ResponseHeadersRead, ct)
+                .ConfigureAwait(false);
+            resp.EnsureSuccessStatusCode();
+            using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            using var reader = new System.IO.StreamReader(stream);
+
+            while (!ct.IsCancellationRequested)
+            {
+                var line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
+                if (line == null) break; // end of stream
+                if (!line.StartsWith("data: ")) continue;
+
+                var data = line["data: ".Length..];
+                if (data == "[DONE]") break;
+
+                using var doc = JsonDocument.Parse(data);
+                var choices = doc.RootElement.GetProperty("choices");
+                if (choices.GetArrayLength() == 0) continue;
+
+                var delta = choices[0].GetProperty("delta");
+                if (!delta.TryGetProperty("content", out var contentProp)) continue;
+                var token = contentProp.GetString();
+                if (!string.IsNullOrEmpty(token))
+                    onToken(token);
+            }
         }
 
         private void btnBrowse_Click(object sender, EventArgs e)
@@ -458,7 +582,7 @@ namespace LlamaServerLauncher
                 InitGpuVramCounters();
             });
 
-            _monitorTimer = new Timer { Interval = 1500 };
+            _monitorTimer = new System.Windows.Forms.Timer { Interval = 1500 };
             _monitorTimer.Tick += MonitorTick;
             _monitorTimer.Start();
         }
@@ -492,46 +616,113 @@ namespace LlamaServerLauncher
             lock (_gpuLock) { _gpuVramCounters.ForEach(c => c.Dispose()); _gpuVramCounters = fresh; }
         }
 
-        private void MonitorTick(object sender, EventArgs e)
+        private async void MonitorTick(object sender, EventArgs e)
         {
-            if (tabMain.SelectedTab == tabLog)
+            if (_monitorBusy) return;
+            _monitorBusy = true;
+            try
             {
-                long currentBytes = File.Exists(_logFilePath) ? new FileInfo(_logFilePath).Length : 0;
-                if (currentBytes != _logViewRenderedBytes)
-                    RefreshLogView();
+                // ── Log tab refresh — file read on background thread ──────
+                if (tabMain.SelectedTab == tabLog)
+                {
+                    var lines = await Task.Run(() =>
+                    {
+                        long sz = File.Exists(_logFilePath) ? new FileInfo(_logFilePath).Length : 0;
+                        return sz == _logViewRenderedBytes ? null : ReadLogLines();
+                    });
+                    if (lines != null) RenderLogLines(lines);
+                }
+
+                if (++_monitorTick % 20 == 0)
+                    _ = Task.Run(RefreshGpuCounters);
+
+                // ── All counter reads on background thread ────────────────
+                var s = await Task.Run(SampleMetrics);
+
+                // ── Graph updates on UI thread ────────────────────────────
+                graphCpu.AddSample(s.CpuPct,  s.CpuLbl);
+                graphRam.AddSample(s.RamPct,  s.RamLbl);
+                graphGpu.AddSample(s.GpuPct,  s.GpuLbl);
+                graphVram.AddSample(s.VramPct, s.VramLbl);
+
+                // ── Context ───────────────────────────────────────────────
+                bool serverRunning = false;
+                try { serverRunning = _proc != null && !_proc.HasExited; } catch { }
+                if (serverRunning && !_pollingSlotsInProgress)
+                    _ = PollSlotsAsync((int)nudPort.Value);
+
+                int ctxMax = _ctxMax, ctxCur = _ctxCurrent;
+                graphCtx.AddSample(
+                    ctxMax > 0 ? ctxCur * 100f / ctxMax : 0,
+                    ctxMax > 0 ? $"{ctxCur:N0} / {ctxMax:N0}" : "—");
+
+                // ── Store last-known values and accumulate session samples ─
+                if (s.StoreCpu    >= 0) _lastCpu    = s.StoreCpu;
+                if (s.StoreGpuPct >= 0) _lastGpuPct = s.StoreGpuPct;
+                if (s.StoreVramGb >= 0) _lastVramGb = s.StoreVramGb;
+
+                bool isRunning = false;
+                try { isRunning = _proc != null && !_proc.HasExited; } catch { }
+                if (isRunning)
+                {
+                    if (s.StoreCpu    >= 0) _metricsCpu.Add(s.StoreCpu);
+                    if (s.StoreRamGb  >= 0) _metricsRamGb.Add(s.StoreRamGb);
+                    if (s.StoreGpuPct >= 0) _metricsGpuPct.Add(s.StoreGpuPct);
+                    if (s.StoreVramGb >= 0) _metricsVramGb.Add(s.StoreVramGb);
+                }
+
+                if (_monitorTick % 3 == 0) UpdatePerformanceTips();
             }
+            finally { _monitorBusy = false; }
+        }
 
-            if (++_monitorTick % 20 == 0)
-                Task.Run(RefreshGpuCounters);
+        private readonly struct HwSample
+        {
+            public readonly float CpuPct, RamPct, GpuPct, VramPct;
+            public readonly float StoreCpu, StoreRamGb, StoreGpuPct, StoreVramGb;
+            public readonly string CpuLbl, RamLbl, GpuLbl, VramLbl;
 
-            float sampleCpu = -1, sampleRamGb = -1, sampleGpuPct = -1, sampleVramGb = -1;
+            public HwSample(
+                float cpuPct,  string cpuLbl,  float storeCpu,
+                float ramPct,  string ramLbl,  float storeRamGb,
+                float gpuPct,  string gpuLbl,  float storeGpuPct,
+                float vramPct, string vramLbl, float storeVramGb)
+            {
+                CpuPct = cpuPct;   CpuLbl = cpuLbl;   StoreCpu    = storeCpu;
+                RamPct = ramPct;   RamLbl = ramLbl;   StoreRamGb  = storeRamGb;
+                GpuPct = gpuPct;   GpuLbl = gpuLbl;   StoreGpuPct = storeGpuPct;
+                VramPct = vramPct; VramLbl = vramLbl; StoreVramGb = storeVramGb;
+            }
+        }
 
+        private HwSample SampleMetrics()
+        {
             // ── CPU ──────────────────────────────────────────────────────
             float cpu = -1;
             try { cpu = _cpuCounter?.NextValue() ?? -1; } catch { }
-            if (cpu >= 0) sampleCpu = cpu;
-            graphCpu.AddSample(
-                cpu >= 0 ? cpu : 0,
-                cpu >= 0 ? $"{cpu:F0}%" : "N/A");
+            float cpuPct  = cpu >= 0 ? cpu : 0;
+            string cpuLbl = cpu >= 0 ? $"{cpu:F0}%" : "N/A";
 
             // ── RAM ───────────────────────────────────────────────────────
+            float ramPct = 0, storeRamGb = -1;
+            string ramLbl = "N/A";
             try
             {
                 float availMb = _ramAvailCounter?.NextValue() ?? 0;
                 if (_totalRamMb > 0)
                 {
-                    float usedMb = _totalRamMb - availMb;
-                    float pct = usedMb / _totalRamMb * 100f;
+                    float usedMb  = _totalRamMb - availMb;
                     float totalGb = _totalRamMb / 1024f;
-                    sampleRamGb = usedMb / 1024f;
-                    graphRam.AddSample(pct, $"{usedMb / 1024f:F1} / {totalGb:F0} GB");
+                    storeRamGb = usedMb / 1024f;
+                    ramPct = usedMb / _totalRamMb * 100f;
+                    ramLbl = $"{storeRamGb:F1} / {totalGb:F0} GB";
                 }
-                else graphRam.AddSample(0, "N/A");
             }
-            catch { graphRam.AddSample(0, "N/A"); }
+            catch { }
 
             // ── GPU ───────────────────────────────────────────────────────
-            float gpuTotal = 0;
+            float gpuTotal = 0, storeGpuPct = -1;
+            bool hasGpuCounters;
             lock (_gpuLock)
             {
                 List<PerformanceCounter> bad = null;
@@ -541,19 +732,21 @@ namespace LlamaServerLauncher
                     catch { (bad ??= new()).Add(c); }
                 }
                 if (bad != null) { bad.ForEach(c => { _gpuEngineCounters.Remove(c); c.Dispose(); }); }
+                hasGpuCounters = _gpuEngineCounters.Count > 0;
             }
             float gpuPct = Math.Min(gpuTotal, 100f);
-            if (_gpuEngineCounters.Count > 0) sampleGpuPct = gpuPct;
-            graphGpu.AddSample(gpuPct, _gpuEngineCounters.Count > 0 ? $"{gpuPct:F0}%" : "N/A");
+            if (hasGpuCounters) storeGpuPct = gpuPct;
+            string gpuLbl = hasGpuCounters ? $"{gpuPct:F0}%" : "N/A";
 
             // ── VRAM ──────────────────────────────────────────────────────
+            float vramPct = 0, storeVramGb = -1;
+            string vramLbl = "N/A";
             try
             {
-                long usedBytes;
+                long usedBytes = 0;
                 lock (_gpuLock)
                 {
                     List<PerformanceCounter> bad = null;
-                    usedBytes = 0;
                     foreach (var c in _gpuVramCounters)
                     {
                         try { usedBytes += (long)c.NextValue(); }
@@ -561,46 +754,24 @@ namespace LlamaServerLauncher
                     }
                     if (bad != null) { bad.ForEach(c => { _gpuVramCounters.Remove(c); c.Dispose(); }); }
                 }
-
                 if (_gpuTotalVramBytes > 0)
                 {
-                    float pct = (float)(usedBytes / (double)_gpuTotalVramBytes * 100.0);
+                    vramPct    = (float)(usedBytes / (double)_gpuTotalVramBytes * 100.0);
                     double usedG = usedBytes / (1024.0 * 1024 * 1024);
-                    double totG = _gpuTotalVramBytes / (1024.0 * 1024 * 1024);
-                    sampleVramGb = (float)usedG;
-                    graphVram.AddSample(pct, $"{usedG:F1} / {totG:F0} GB");
+                    double totG  = _gpuTotalVramBytes / (1024.0 * 1024 * 1024);
+                    storeVramGb = (float)usedG;
+                    vramLbl = $"{usedG:F1} / {totG:F0} GB";
                 }
-                else graphVram.AddSample(0, usedBytes > 0 ? $"{usedBytes / (1024.0 * 1024 * 1024):F1} GB" : "N/A");
+                else if (usedBytes > 0)
+                    vramLbl = $"{usedBytes / (1024.0 * 1024 * 1024):F1} GB";
             }
-            catch { graphVram.AddSample(0, "N/A"); }
+            catch { }
 
-            // ── Context ───────────────────────────────────────────────────
-            bool serverRunning = false;
-            try { serverRunning = _proc != null && !_proc.HasExited; } catch { }
-            if (serverRunning && !_pollingSlotsInProgress)
-                Task.Run(() => PollSlotsAsync((int)nudPort.Value));
-
-            int ctxMax = _ctxMax, ctxCur = _ctxCurrent;
-            graphCtx.AddSample(
-                ctxMax > 0 ? ctxCur * 100f / ctxMax : 0,
-                ctxMax > 0 ? $"{ctxCur:N0} / {ctxMax:N0}" : "—");
-
-            // ── Store last-known values and accumulate session samples ────
-            if (sampleCpu >= 0) _lastCpu = sampleCpu;
-            if (sampleGpuPct >= 0) _lastGpuPct = sampleGpuPct;
-            if (sampleVramGb >= 0) _lastVramGb = sampleVramGb;
-
-            bool isRunning = false;
-            try { isRunning = _proc != null && !_proc.HasExited; } catch { }
-            if (isRunning)
-            {
-                if (sampleCpu >= 0) _metricsCpu.Add(sampleCpu);
-                if (sampleRamGb >= 0) _metricsRamGb.Add(sampleRamGb);
-                if (sampleGpuPct >= 0) _metricsGpuPct.Add(sampleGpuPct);
-                if (sampleVramGb >= 0) _metricsVramGb.Add(sampleVramGb);
-            }
-
-            if (_monitorTick % 3 == 0) UpdatePerformanceTips();
+            return new HwSample(
+                cpuPct,  cpuLbl,  cpu >= 0 ? cpu : -1f,
+                ramPct,  ramLbl,  storeRamGb,
+                gpuPct,  gpuLbl,  storeGpuPct,
+                vramPct, vramLbl, storeVramGb);
         }
 
         private static readonly Regex _rxCtxMax   = new(@"\bn_ctx\b\s*=\s*(\d+)",     RegexOptions.Compiled);
@@ -743,6 +914,8 @@ namespace LlamaServerLauncher
                 {
                     lblStatus.Text      = "Running…";
                     lblStatus.ForeColor = System.Drawing.SystemColors.ControlText;
+                    txtChatInput.Enabled = true;
+                    btnSendChat.Enabled  = true;
                 }));
             }
 
@@ -799,31 +972,81 @@ namespace LlamaServerLauncher
             }
         }
 
-        private void RefreshLogView()
+        private void ClearLog()
         {
+            lock (_logLock)
+            {
+                _logWriter?.Dispose();
+                _logWriter = null;
+                try { File.Delete(_logFilePath); } catch { }
+
+                bool running = false;
+                try { running = _proc != null && !_proc.HasExited; } catch { }
+                if (running)
+                    try { _logWriter = new StreamWriter(_logFilePath, append: false) { AutoFlush = true }; } catch { }
+            }
             rtbLog.Clear();
-            if (!File.Exists(_logFilePath)) return;
-            string[] lines;
+            _logViewRenderedBytes = -1;
+        }
+
+        private static readonly System.Drawing.Color _logYellow = System.Drawing.Color.FromArgb(255, 210, 60);
+        private static readonly System.Drawing.Color _logAmber  = System.Drawing.Color.FromArgb(255, 160, 30);
+        private static readonly System.Drawing.Color _logRed    = System.Drawing.Color.FromArgb(255, 80,  80);
+        private static readonly System.Drawing.Color _logNormal = System.Drawing.Color.FromArgb(190, 190, 190);
+        private static readonly System.Drawing.Color _logDim    = System.Drawing.Color.FromArgb(100, 100, 100);
+
+        private static System.Drawing.Color ClassifyLogLine(string raw)
+        {
+            // Strip the stderr prefix before matching — llama-server writes everything to stderr
+            // so [E] does not mean the line is actually an error.
+            var line = raw.StartsWith("[E] ") ? raw.Substring(4) : raw;
+
+            if (line.StartsWith("---"))                                                          return _logYellow;
+            if (line.Contains("server is listening") || line.Contains("all slots are ready"))   return _logYellow;
+            if (line.Contains("tokens per second")   || line.Contains("eval time"))             return _logYellow;
+            if (line.Contains("llm_load_tensors")    || line.Contains("llama_model_load"))      return _logYellow;
+            if (line.Contains("WARN")                || line.Contains("warning"))               return _logAmber;
+            if (line.Contains("ERROR")               || line.Contains("error:") ||
+                line.Contains("failed to")           || line.Contains("FAILED"))                return _logRed;
+            return _logNormal;
+        }
+
+        // Sync — safe to call from Task.Run
+        private string[] ReadLogLines()
+        {
+            if (!File.Exists(_logFilePath)) return null;
             try
             {
                 // FileShare.ReadWrite lets us read while _logWriter may still have the file open
                 using var fs = new FileStream(_logFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
                 using var sr = new StreamReader(fs);
-                lines = sr.ReadToEnd().Split(["\r\n", "\r", "\n"], StringSplitOptions.None);
+                var lines = sr.ReadToEnd().Split(["\r\n", "\r", "\n"], StringSplitOptions.None);
+                _logViewRenderedBytes = fs.Length;
+                return lines;
             }
-            catch { return; }
+            catch { return null; }
+        }
 
+        // UI thread only
+        private void RenderLogLines(string[] lines)
+        {
             rtbLog.SuspendLayout();
+            rtbLog.Clear();
             foreach (var line in lines)
             {
-                bool err = line.StartsWith("[E] ");
-                rtbLog.SelectionColor = err ? System.Drawing.Color.Salmon : System.Drawing.Color.LightGray;
-                rtbLog.AppendText((err ? line.Substring(4) : line) + Environment.NewLine);
+                bool isErr = line.StartsWith("[E] ");
+                rtbLog.SelectionColor = ClassifyLogLine(line);
+                rtbLog.AppendText((isErr ? line.Substring(4) : line) + Environment.NewLine);
             }
             rtbLog.ResumeLayout();
             rtbLog.SelectionStart = rtbLog.TextLength;
             rtbLog.ScrollToCaret();
-            _logViewRenderedBytes = new FileInfo(_logFilePath).Length;
+        }
+
+        private void RefreshLogView()
+        {
+            var lines = ReadLogLines();
+            if (lines != null) RenderLogLines(lines);
         }
 
         private async Task LoadHardwareInfoAsync()
@@ -1060,6 +1283,9 @@ namespace LlamaServerLauncher
                 if (cbCacheK.Text == "f16" && cbCacheV.Text == "f16" && hasGpu)
                     Line("▶ KV cache is f16 (default). Switching to q8_0 halves KV VRAM with minimal quality impact.", dim);
 
+                if (vramPct > 70)
+                    Line($"▶ VRAM is {vramPct:F0}% full before the server starts. Another process may be using the GPU — close other apps or reduce GPU layers.", amber);
+
                 if (rtbTips.TextLength == 0)
                     Line("Start the server and send some requests to see live performance tips.", dim);
                 return;
@@ -1271,23 +1497,24 @@ namespace LlamaServerLauncher
 #pragma warning disable CS8632
         private record PerfParams(
             int CtxSize, int GpuLayers, int Threads, int BatchSize, int UbatchSize, bool FlashAttn,
-            string CacheTypeK = "f16", string CacheTypeV = "f16")
+            string CacheTypeK = "f16", string CacheTypeV = "f16", string MmprojPath = "")
         {
             public string ToLabel()
             {
                 var parts = new List<string>();
-                if (CtxSize    > 0)      parts.Add($"ctx={CtxSize:N0}");
-                if (GpuLayers  >= 0)     parts.Add($"ngl={GpuLayers}");
-                if (Threads    >= 0)     parts.Add($"t={Threads}");
-                if (BatchSize  > 0)      parts.Add($"batch={BatchSize}");
-                if (UbatchSize > 0)      parts.Add($"ubatch={UbatchSize}");
-                if (FlashAttn)           parts.Add("flash=yes");
-                if (CacheTypeK != "f16") parts.Add($"ctk={CacheTypeK}");
-                if (CacheTypeV != "f16") parts.Add($"ctv={CacheTypeV}");
+                if (CtxSize    > 0)                        parts.Add($"ctx={CtxSize:N0}");
+                if (GpuLayers  >= 0)                       parts.Add($"ngl={GpuLayers}");
+                if (Threads    >= 0)                       parts.Add($"t={Threads}");
+                if (BatchSize  > 0)                        parts.Add($"batch={BatchSize}");
+                if (UbatchSize > 0)                        parts.Add($"ubatch={UbatchSize}");
+                if (FlashAttn)                             parts.Add("flash=yes");
+                if (CacheTypeK != "f16")                   parts.Add($"ctk={CacheTypeK}");
+                if (CacheTypeV != "f16")                   parts.Add($"ctv={CacheTypeV}");
+                if (!string.IsNullOrEmpty(MmprojPath))     parts.Add($"mmproj={Path.GetFileName(MmprojPath)}");
                 return parts.Count > 0 ? string.Join("  ", parts) : "(all defaults)";
             }
 
-            public string ToKey() => $"{CtxSize}|{GpuLayers}|{Threads}|{BatchSize}|{UbatchSize}|{FlashAttn}|{CacheTypeK}|{CacheTypeV}";
+            public string ToKey() => $"{CtxSize}|{GpuLayers}|{Threads}|{BatchSize}|{UbatchSize}|{FlashAttn}|{CacheTypeK}|{CacheTypeV}|{MmprojPath}";
         }
 
         private sealed class PerfConfigItem
@@ -1345,6 +1572,12 @@ namespace LlamaServerLauncher
             SelectCombo(cbCacheK, p.CacheTypeK);
             SelectCombo(cbCacheV, p.CacheTypeV);
 
+            _mmprojPath            = p.MmprojPath ?? "";
+            txtMmprojPath.Text     = _mmprojPath;
+            chkMmproj.Checked      = !string.IsNullOrEmpty(_mmprojPath);
+            txtMmprojPath.Enabled  = chkMmproj.Checked;
+            btnBrowseMmproj.Enabled = chkMmproj.Checked;
+
             tabMain.SelectedTab = tabModel;
         }
 
@@ -1395,6 +1628,7 @@ namespace LlamaServerLauncher
         private static readonly Regex _rxUbatch   = new(@"(?:-ub|--ubatch-size)\s+(\d+)",   RegexOptions.Compiled);
         private static readonly Regex _rxCacheK   = new(@"--cache-type-k\s+(\S+)",          RegexOptions.Compiled);
         private static readonly Regex _rxCacheV   = new(@"--cache-type-v\s+(\S+)",          RegexOptions.Compiled);
+        private static readonly Regex _rxMmproj   = new(@"--mmproj\s+""([^""]+)""",         RegexOptions.Compiled);
         private static readonly Regex _rxModelArg = new(@"-m\s+""[^""]*""\s*",              RegexOptions.Compiled);
 
         private static string StripModelArg(string args)
@@ -1419,7 +1653,8 @@ namespace LlamaServerLauncher
                 UbatchSize: GetInt(_rxUbatch),
                 FlashAttn:  HasFlag("--flash-attn") || HasFlag("-fa"),
                 CacheTypeK: GetStr(_rxCacheK, "f16"),
-                CacheTypeV: GetStr(_rxCacheV, "f16"));
+                CacheTypeV: GetStr(_rxCacheV, "f16"),
+                MmprojPath: GetStr(_rxMmproj, ""));
         }
     }
 }
