@@ -19,12 +19,6 @@ namespace LlamaServerLauncher
         private TreeView treePerf;
         private Button btnClearPerf;
 
-        // Quick Prompt (Model tab)
-        private TextBox txtChatInput;
-        private Button btnSendChat;
-        private Button btnCancelChat;
-        private Label lblChatStatus;
-
         // Model tab
         private RichTextBox rtbTips;
 
@@ -155,7 +149,7 @@ namespace LlamaServerLauncher
             this.lblStatus     = new Label   { AutoSize = false, Dock = DockStyle.Fill, Text = "", TextAlign = System.Drawing.ContentAlignment.MiddleLeft, Padding = new Padding(4, 0, 0, 0) };
 
             // ── ComboBox items ──────────────────────────────────────────────
-            var cacheTypes = new[] { "f16", "f32", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1" };
+            var cacheTypes = new[] { "f16", "f32", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1", "turbo3", "turbo4"  };
             this.cbCacheK.Items.AddRange(cacheTypes);   this.cbCacheK.SelectedIndex = 0;
             this.cbCacheV.Items.AddRange(cacheTypes);   this.cbCacheV.SelectedIndex = 0;
             this.cbReasoning.Items.AddRange(new[] { "auto", "on", "off" });
@@ -167,7 +161,7 @@ namespace LlamaServerLauncher
 
             tlpModel.RowStyles[4] = new RowStyle(SizeType.Absolute, 160F);  // HW side-by-side panel
             tlpModel.RowStyles[5] = new RowStyle(SizeType.Absolute, 110F);  // Context graph
-            tlpModel.RowStyles[6] = new RowStyle(SizeType.Absolute, 28F);   // Perf Observations label
+            tlpModel.RowStyles[6] = new RowStyle(SizeType.Absolute, 36F);   // Perf Observations label
             tlpModel.RowStyles[7] = new RowStyle(SizeType.Absolute, 110F);  // Perf Observations box
 
             AddRow(tlpModel, 0, MakeLbl("Model File"), tlpModelRow, "The .gguf model file to load and serve.");
@@ -338,49 +332,8 @@ namespace LlamaServerLauncher
             Span3(tlpModel, lblPerfSep,    0, 6);
             Span3(tlpModel, this.rtbTips,  0, 7);
 
-            // ── QUICK PROMPT — pinned above Performance Observations ──────
-            this.txtChatInput  = new TextBox { Dock = DockStyle.Fill, Enabled = false, Margin = new Padding(0), PlaceholderText = "Type a prompt and press Enter or Send…" };
-            this.btnSendChat   = new Button  { Text = "Send",   Dock = DockStyle.Fill, Enabled = false, Margin = new Padding(2, 0, 0, 0) };
-            this.btnCancelChat = new Button  { Text = "Cancel", Dock = DockStyle.Fill, Enabled = false, Margin = new Padding(2, 0, 0, 0) };
-            this.lblChatStatus = new Label   { Dock = DockStyle.Fill, Text = "", ForeColor = System.Drawing.Color.DimGray, Font = new Font("Consolas", 8F), TextAlign = System.Drawing.ContentAlignment.MiddleLeft, Padding = new Padding(4, 0, 0, 0) };
-            this.txtChatInput.KeyDown += (_, e) =>
-            {
-                if (e.KeyCode == Keys.Enter && this.btnSendChat.Enabled)
-                { e.SuppressKeyPress = true; this.btnSendChat.PerformClick(); }
-            };
-
-            var lblQuickPrompt = new Label
-            {
-                Text = "Quick Prompt", Dock = DockStyle.Fill, AutoSize = false,
-                ForeColor = System.Drawing.Color.Gray,
-                Font = new Font(Font, FontStyle.Bold),
-                Padding = new Padding(4, 2, 0, 0)
-            };
-
-            // 3-column TLP: [input fill | Cancel 80px | Send 80px], 3 rows: title / input / status
-            var tlpChatSection = new TableLayoutPanel
-            {
-                Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 3,
-                Margin = new Padding(0), Padding = new Padding(4, 2, 4, 2)
-            };
-            tlpChatSection.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            tlpChatSection.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 82F));
-            tlpChatSection.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 82F));
-            tlpChatSection.RowStyles.Add(new RowStyle(SizeType.Absolute, 22F));  // title
-            tlpChatSection.RowStyles.Add(new RowStyle(SizeType.Absolute, 28F));  // input + buttons
-            tlpChatSection.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));  // status
-
-            tlpChatSection.Controls.Add(lblQuickPrompt,     0, 0); tlpChatSection.SetColumnSpan(lblQuickPrompt,     3);
-            tlpChatSection.Controls.Add(this.txtChatInput,  0, 1);
-            tlpChatSection.Controls.Add(this.btnCancelChat, 1, 1);
-            tlpChatSection.Controls.Add(this.btnSendChat,   2, 1);
-            tlpChatSection.Controls.Add(this.lblChatStatus, 0, 2); tlpChatSection.SetColumnSpan(this.lblChatStatus, 3);
-
-            var pnlChat = new Panel { Dock = DockStyle.Bottom, Height = 76 };
-            pnlChat.Controls.Add(tlpChatSection);
 
             this.tabModel.Controls.Add(Scrollable(tlpModel));
-            this.tabModel.Controls.Add(pnlChat); // docks above nothing — just above the scrollable area's bottom
 
             // ── SERVER TAB ────────────────────────────────────────────────
             var tlpServer = MakeTlp(3);
@@ -622,8 +575,7 @@ namespace LlamaServerLauncher
             this.btnBrowse.Click       += btnBrowse_Click;
             this.btnBrowseExe.Click    += btnBrowseExe_Click;
             this.btnBrowseMmproj.Click += btnBrowseMmproj_Click;
-            this.btnSendChat.Click     += btnSendChat_Click;
-            this.btnCancelChat.Click   += (_, _) => _chatCts?.Cancel();
+
 
             void refreshPreview(object s, System.EventArgs e) => UpdateCommandPreview();
             foreach (var n in new NumericUpDown[] { nudGpuLayers, nudCtxSize, nudPort, nudThreads, nudParallel, nudBatchSize, nudUBatchSize, nudTemperature, nudTopK, nudTopP, nudMinP, nudSeed, nudRepeatPenalty })

@@ -8,6 +8,7 @@
 # Build directories
 bin/
 obj/
+.bat
 
 # Windows image file caches
 Thumbs.db
@@ -27,6 +28,7 @@ Desktop.ini
 
 # Logs
 *.log
+*.txt
 
 # WAP / MSIX
 AppPackages/

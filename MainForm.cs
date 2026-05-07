@@ -39,20 +39,10 @@ namespace LlamaServerLauncher
         private bool _monitorBusy;
 
         // Context usage — populated by /slots API polling (log parsing used as fallback on startup)
-        private volatile int _ctxMax, _ctxCurrent;
+            private int _ctxMax, _ctxCurrent;
         private volatile bool _pollingSlotsInProgress;
         private volatile bool _serverReady;
         private static readonly System.Net.Http.HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(3) };
-        private static readonly System.Net.Http.HttpClient _inferenceHttp = new() { Timeout = System.Threading.Timeout.InfiniteTimeSpan };
-
-        // Chat
-        private CancellationTokenSource _chatCts;
-        private readonly List<(string Role, string Content)> _chatMessages = new();
-        private System.Windows.Forms.Timer _spinTimer;
-        private int _spinFrame;
-        private volatile int _chatTokenCount;
-        private System.Diagnostics.Stopwatch _chatStopwatch;
-        private static readonly char[] SpinFrames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏".ToCharArray();
 
         // Server log file (written in real-time; rtbLog is populated on-demand when tab is shown)
         private readonly string _logFilePath = "server_log.txt";
@@ -305,9 +295,6 @@ namespace LlamaServerLauncher
                         lblStatus.ForeColor = System.Drawing.SystemColors.ControlText;
                         btnLaunch.Text = "Launch llama-server";
                         btnOpenChat.Enabled = false;
-                        txtChatInput.Enabled = false;
-                        btnSendChat.Enabled = false;
-                        _chatCts?.Cancel();
                         SavePerformanceSession(code);
                         UpdatePerformanceTips();
                     }));
@@ -352,114 +339,6 @@ namespace LlamaServerLauncher
             Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
         }
 
-        private void EnsureSpinTimer()
-        {
-            if (_spinTimer != null) return;
-            _spinTimer = new System.Windows.Forms.Timer { Interval = 100 };
-            _spinTimer.Tick += (_, _) =>
-            {
-                _spinFrame = (_spinFrame + 1) % SpinFrames.Length;
-                double tps = _chatStopwatch != null && _chatStopwatch.Elapsed.TotalSeconds > 0.1
-                    ? _chatTokenCount / _chatStopwatch.Elapsed.TotalSeconds : 0;
-                lblChatStatus.Text = $"{SpinFrames[_spinFrame]}  {_chatTokenCount} tokens   {tps:F1} t/s";
-            };
-        }
-
-        private async void btnSendChat_Click(object sender, EventArgs e)
-        {
-            var prompt = txtChatInput.Text.Trim();
-            if (string.IsNullOrEmpty(prompt)) return;
-
-            txtChatInput.Clear();
-            _chatMessages.Add(("user", prompt));
-
-            btnSendChat.Enabled   = false;
-            txtChatInput.Enabled  = false;
-            btnCancelChat.Enabled = true;
-            _chatCts = new CancellationTokenSource();
-
-            _chatTokenCount = 0;
-            _chatStopwatch  = System.Diagnostics.Stopwatch.StartNew();
-            EnsureSpinTimer();
-            _spinTimer.Start();
-
-            var sb = new StringBuilder();
-            try
-            {
-                await StreamChatAsync(token => { sb.Append(token); _chatTokenCount++; _ctxCurrent++; }, _chatCts.Token);
-
-                _spinTimer.Stop();
-                _chatStopwatch.Stop();
-                double finalTps = _chatTokenCount > 0 ? _chatTokenCount / _chatStopwatch.Elapsed.TotalSeconds : 0;
-                _chatMessages.Add(("assistant", sb.ToString()));
-                lblChatStatus.Text = $"✓  {_chatTokenCount} tokens   {finalTps:F1} t/s";
-            }
-            catch (OperationCanceledException)
-            {
-                _spinTimer.Stop();
-                _chatMessages.RemoveAt(_chatMessages.Count - 1);
-                lblChatStatus.Text = "— Cancelled";
-            }
-            catch (Exception ex)
-            {
-                _spinTimer.Stop();
-                _chatMessages.RemoveAt(_chatMessages.Count - 1);
-                lblChatStatus.Text = $"✗  {ex.Message}";
-            }
-            finally
-            {
-                btnCancelChat.Enabled = false;
-                if (_serverReady)
-                {
-                    btnSendChat.Enabled  = true;
-                    txtChatInput.Enabled = true;
-                    txtChatInput.Focus();
-                }
-            }
-        }
-
-        private async Task StreamChatAsync(Action<string> onToken, CancellationToken ct)
-        {
-            // Build request on the UI thread (nudPort is a UI control)
-            var messages = _chatMessages
-                .Select(m => new { role = m.Role, content = m.Content })
-                .ToArray();
-            var body = JsonSerializer.Serialize(new { messages, stream = true });
-            var req = new System.Net.Http.HttpRequestMessage(System.Net.Http.HttpMethod.Post,
-                $"http://localhost:{nudPort.Value}/v1/chat/completions")
-            {
-                Content = new System.Net.Http.StringContent(body, Encoding.UTF8, "application/json")
-            };
-
-            // ConfigureAwait(false) on every await keeps all continuations off the UI
-            // thread's SynchronizationContext. Without this, each token arrival posts a
-            // continuation back to the UI message queue, starving it during fast inference.
-            using var resp = await _inferenceHttp.SendAsync(req, System.Net.Http.HttpCompletionOption.ResponseHeadersRead, ct)
-                .ConfigureAwait(false);
-            resp.EnsureSuccessStatusCode();
-            using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
-            using var reader = new System.IO.StreamReader(stream);
-
-            while (!ct.IsCancellationRequested)
-            {
-                var line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
-                if (line == null) break; // end of stream
-                if (!line.StartsWith("data: ")) continue;
-
-                var data = line["data: ".Length..];
-                if (data == "[DONE]") break;
-
-                using var doc = JsonDocument.Parse(data);
-                var choices = doc.RootElement.GetProperty("choices");
-                if (choices.GetArrayLength() == 0) continue;
-
-                var delta = choices[0].GetProperty("delta");
-                if (!delta.TryGetProperty("content", out var contentProp)) continue;
-                var token = contentProp.GetString();
-                if (!string.IsNullOrEmpty(token))
-                    onToken(token);
-            }
-        }
 
         private void btnBrowse_Click(object sender, EventArgs e)
         {
@@ -595,7 +474,8 @@ namespace LlamaServerLauncher
                 var cat = new PerformanceCounterCategory("GPU Engine");
                 foreach (var inst in cat.GetInstanceNames())
                 {
-                    if (!inst.Contains("engtype_3D", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!inst.Contains("engtype_3D",       StringComparison.OrdinalIgnoreCase) &&
+                        !inst.Contains("engtype_Compute", StringComparison.OrdinalIgnoreCase)) continue;
                     try { var c = new PerformanceCounter("GPU Engine", "Utilization Percentage", inst, true); c.NextValue(); fresh.Add(c); } catch { }
                 }
             }
@@ -792,8 +672,8 @@ namespace LlamaServerLauncher
                     if (slot.TryGetProperty("n_ctx",  out var c)) nCtx  = Math.Max(nCtx,  c.GetInt32());
                 }
                 if (nCtx  > 0) _ctxMax = nCtx;
-                // Only advance; keeps last value when slots are idle between requests
-                if (nPast > 0) _ctxCurrent = nPast;
+                // Only advance — keeps last value when slots are idle between requests
+                if (nPast > _ctxCurrent) _ctxCurrent = nPast;
             }
             catch { }
             finally { _pollingSlotsInProgress = false; }
@@ -914,8 +794,6 @@ namespace LlamaServerLauncher
                 {
                     lblStatus.Text      = "Running…";
                     lblStatus.ForeColor = System.Drawing.SystemColors.ControlText;
-                    txtChatInput.Enabled = true;
-                    btnSendChat.Enabled  = true;
                 }));
             }
 
@@ -1550,6 +1428,13 @@ namespace LlamaServerLauncher
             static decimal Clamp(decimal val, NumericUpDown n) =>
                 Math.Max(n.Minimum, Math.Min(n.Maximum, val));
 
+            static void SelectCombo(ComboBox cb, string value)
+            {
+                for (int i = 0; i < cb.Items.Count; i++)
+                    if (cb.Items[i]?.ToString() == value) { cb.SelectedIndex = i; return; }
+            }
+
+            // ── Settings captured in PerfParams ───────────────────────────
             if (p.GpuLayers == -1)         cbNglMode.SelectedIndex = 0;
             else if (p.GpuLayers == 0)     cbNglMode.SelectedIndex = 1;
             else if (p.GpuLayers == 999)   cbNglMode.SelectedIndex = 2;
@@ -1560,23 +1445,35 @@ namespace LlamaServerLauncher
 
             if (p.CtxSize == 0) chkCtxDefault.Checked = true;
             else { chkCtxDefault.Checked = false; nudCtxSize.Value = Clamp(p.CtxSize, nudCtxSize); }
-            nudBatchSize.Value   = Clamp(p.BatchSize  > 0 ? p.BatchSize  : 2048,     nudBatchSize);
-            nudUBatchSize.Value  = Clamp(p.UbatchSize > 0 ? p.UbatchSize : 512,      nudUBatchSize);
-            chkFlashAttn.Checked = p.FlashAttn;
 
-            static void SelectCombo(ComboBox cb, string value)
-            {
-                for (int i = 0; i < cb.Items.Count; i++)
-                    if (cb.Items[i]?.ToString() == value) { cb.SelectedIndex = i; return; }
-            }
+            nudBatchSize.Value   = Clamp(p.BatchSize  > 0 ? p.BatchSize  : 2048, nudBatchSize);
+            nudUBatchSize.Value  = Clamp(p.UbatchSize > 0 ? p.UbatchSize : 512,  nudUBatchSize);
+            chkFlashAttn.Checked = p.FlashAttn;
             SelectCombo(cbCacheK, p.CacheTypeK);
             SelectCombo(cbCacheV, p.CacheTypeV);
 
-            _mmprojPath            = p.MmprojPath ?? "";
-            txtMmprojPath.Text     = _mmprojPath;
-            chkMmproj.Checked      = !string.IsNullOrEmpty(_mmprojPath);
-            txtMmprojPath.Enabled  = chkMmproj.Checked;
+            _mmprojPath             = p.MmprojPath ?? "";
+            txtMmprojPath.Text      = _mmprojPath;
+            chkMmproj.Checked       = !string.IsNullOrEmpty(_mmprojPath);
+            txtMmprojPath.Enabled   = chkMmproj.Checked;
             btnBrowseMmproj.Enabled = chkMmproj.Checked;
+
+            // ── Reset all other settings to their defaults ─────────────────
+            nudParallel.Value          = 1;
+            chkContBatching.Checked    = false;
+            chkMmap.Checked            = true;
+            chkMlock.Checked           = false;
+            cbReasoning.SelectedIndex  = 0;   // auto
+            nudTemperature.Value       = Clamp(0.80M, nudTemperature);
+            nudTopK.Value              = Clamp(40,    nudTopK);
+            nudTopP.Value              = Clamp(0.95M, nudTopP);
+            nudMinP.Value              = Clamp(0.05M, nudMinP);
+            chkSeedRandom.Checked      = true;
+            nudSeed.Value              = 0;
+            nudRepeatPenalty.Value     = Clamp(1.00M, nudRepeatPenalty);
+            chkEmbedding.Checked       = false;
+            chkRerank.Checked          = false;
+            chkMetrics.Checked         = false;
 
             tabMain.SelectedTab = tabModel;
         }
