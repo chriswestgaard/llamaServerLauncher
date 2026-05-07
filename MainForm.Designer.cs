@@ -41,8 +41,12 @@ namespace LlamaServerLauncher
         private CheckBox chkFlashAttn, chkContBatching;
 
         // Cache tab
-        private ComboBox cbCacheK, cbCacheV, cbReasoning;
-        private CheckBox chkMmap, chkMlock;
+        private ComboBox cbCacheK, cbCacheV, cbReasoning, cbSplitMode;
+        private CheckBox chkMmap, chkMlock, chkKvOffload, chkContextShift;
+        private NumericUpDown nudDefragThold;
+        private CheckBox chkThreadsBatchAuto;
+        private NumericUpDown nudThreadsBatch;
+        private NumericUpDown nudCacheReuse;
 
         // Sampling tab
         private NumericUpDown nudTemperature, nudTopK, nudTopP, nudMinP, nudSeed, nudRepeatPenalty;
@@ -126,6 +130,16 @@ namespace LlamaServerLauncher
             this.chkMmap     = new CheckBox { Text = "Memory-map file  (mmap)",  AutoSize = true, Checked = true };
             this.chkMlock    = new CheckBox { Text = "Lock model in RAM  (mlock)", AutoSize = true };
 
+            this.cbSplitMode       = new ComboBox { Width = 110, DropDownStyle = ComboBoxStyle.DropDownList };
+            this.cbSplitMode.Items.AddRange(new[] { "layer", "none", "row", "tensor" });
+            this.cbSplitMode.SelectedIndex = 0;
+            this.chkKvOffload      = new CheckBox { Text = "KV cache offload  (GPU)", AutoSize = true, Checked = true };
+            this.nudDefragThold    = new NumericUpDown { Dock = DockStyle.Fill, Minimum = -1M, Maximum = 1M, Value = -1M, DecimalPlaces = 2, Increment = 0.05M };
+            this.chkThreadsBatchAuto = new CheckBox { Text = "Auto", AutoSize = true, Checked = true, Margin = new Padding(0, 2, 8, 0) };
+            this.nudThreadsBatch   = new NumericUpDown { Minimum = 1, Maximum = 256, Value = 4, Width = 60, Visible = false };
+            this.chkContextShift   = new CheckBox { Text = "Context Shift", AutoSize = true, Checked = true };
+            this.nudCacheReuse     = new NumericUpDown { Dock = DockStyle.Fill, Minimum = 0, Maximum = 32768, Value = 0 };
+
             this.nudTemperature   = new NumericUpDown { Dock = DockStyle.Fill, Minimum = 0M, Maximum = 5M,          Value = 0.80M, DecimalPlaces = 2, Increment = 0.05M };
             this.nudTopK          = new NumericUpDown { Dock = DockStyle.Fill, Minimum = 0,  Maximum = 10000,        Value = 40    };
             this.nudTopP          = new NumericUpDown { Dock = DockStyle.Fill, Minimum = 0M, Maximum = 1M,           Value = 0.95M, DecimalPlaces = 2, Increment = 0.01M };
@@ -196,7 +210,7 @@ namespace LlamaServerLauncher
             tlpPerfCols.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
             tlpPerfCols.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
-            var tlpPerfL = MakeTlp(7);
+            var tlpPerfL = MakeTlp(10);
 
             var pnlNgl = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
             pnlNgl.Controls.Add(this.cbNglMode);
@@ -228,8 +242,11 @@ namespace LlamaServerLauncher
             AddRow(tlpPerfL, 4, MakeLbl("Cache Type K  (-ctk)"), this.cbCacheK,      "KV cache data type for Keys (default: f16).\nAllowed: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1.\nbf16 / q8_0 saves VRAM with minor quality loss. (-ctk)");
             AddRow(tlpPerfL, 5, MakeLbl("Cache Type V  (-ctv)"), this.cbCacheV,      "KV cache data type for Values (default: f16).\nSame options as Cache Type K. (-ctv)");
             AddRow(tlpPerfL, 6, MakeLbl("Reasoning  (-rea)"),    this.cbReasoning,   "Use reasoning/thinking in chat (default: auto).\n'auto' = detect from model template.\n'on'   = enable reasoning tokens.\n'off'  = disable reasoning. (-rea)");
+            AddRow(tlpPerfL, 7, MakeLbl("Split Mode  (-sm)"),    this.cbSplitMode,   "Multi-GPU tensor split strategy (default: layer).\nlayer  = split by layers across GPUs.\nnone   = single GPU only.\nrow    = split by matrix rows.\ntensor = split by tensor dimensions. (-sm)");
+            AddChk(tlpPerfL, 8, this.chkKvOffload,               "Offload KV cache to GPU VRAM (default: on).\nUncheck to keep KV cache in system RAM — useful when VRAM is tight.\n(-nkvo / --no-kv-offload)");
+            AddRow(tlpPerfL, 9, MakeLbl("Defrag Threshold (-dt)"), this.nudDefragThold, "KV cache defragmentation threshold (default: -1 = disabled).\n0.0–1.0 = trigger defrag when fragmentation exceeds this ratio.\nHelps with long sessions that cycle many slots. (-dt)");
 
-            var tlpPerfR = MakeTlp(6);
+            var tlpPerfR = MakeTlp(8);
             var pnlThreads = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
             pnlThreads.Controls.Add(this.chkThreadsAuto);
             pnlThreads.Controls.Add(this.nudThreads);
@@ -240,6 +257,12 @@ namespace LlamaServerLauncher
             AddChk(tlpPerfR, 3, this.chkContBatching, "Process new requests without waiting for current ones to finish.\nImproves throughput under concurrent load. (-cb)");
             AddChk(tlpPerfR, 4, this.chkMmap,  "Memory-map model for faster load (default: enabled).\nUncheck to fully load into RAM (--no-mmap). (--mmap)");
             AddChk(tlpPerfR, 5, this.chkMlock, "Force system to keep model in RAM rather than swapping.\nRequires sufficient free RAM. (--mlock)");
+            var pnlThreadsBatch = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+            pnlThreadsBatch.Controls.Add(this.chkThreadsBatchAuto);
+            pnlThreadsBatch.Controls.Add(this.nudThreadsBatch);
+            this.chkThreadsBatchAuto.CheckedChanged += (_, _) => this.nudThreadsBatch.Visible = !this.chkThreadsBatchAuto.Checked;
+            AddRow(tlpPerfR, 6, MakeLbl("Threads Batch  (-tb)"), pnlThreadsBatch, "CPU threads used during prompt processing / prefill.\nAuto = same as generation threads.\nSet higher than generation threads to speed up long prompts. (-tb)");
+            AddChk(tlpPerfR, 7, this.chkContextShift, "Shift context window when full instead of erroring (default: on).\nUncheck (--no-context-shift) to return an error when context is exhausted.\nLeave on for infinite generation / long conversations.");
 
             tlpPerfCols.Controls.Add(tlpPerfL, 0, 0);
             tlpPerfCols.Controls.Add(tlpPerfR, 1, 0);
@@ -336,7 +359,7 @@ namespace LlamaServerLauncher
             this.tabModel.Controls.Add(Scrollable(tlpModel));
 
             // ── SERVER TAB ────────────────────────────────────────────────
-            var tlpServer = MakeTlp(3);
+            var tlpServer = MakeTlp(4);
             var pnlHost = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
             pnlHost.Controls.Add(this.rdoHostLocal);
             pnlHost.Controls.Add(this.rdoHostAll);
@@ -346,6 +369,7 @@ namespace LlamaServerLauncher
             AddRow(tlpServer, 0, MakeLbl("Allow connect (--host)"), pnlHost, "IP address to listen on (default: 127.0.0.1).\n127.0.0.1 = local only.\n0.0.0.0 = accept from any interface. (--host)");
             AddRow(tlpServer, 1, MakeLbl("Port  (--port)"),   this.nudPort,  "TCP port for the HTTP API. Default: 8080. (--port)");
             AddRow(tlpServer, 2, MakeLbl("Tools  (--tools)"), this.txtTools, "Built-in tools available to AI agents.\nUse 'all' to enable everything, or a comma-separated list.\nLeave blank to disable. (--tools)");
+            AddRow(tlpServer, 3, MakeLbl("Cache Reuse  (--cache-reuse)"), this.nudCacheReuse, "Minimum chunk size (tokens) for prompt cache reuse (default: 0 = disabled).\nHigher values skip reuse of small overlapping prefixes — reduces overhead.\nSet to 256–1024 for best cache hit rate with typical prompts. (--cache-reuse)");
             this.tabServer.Controls.Add(Scrollable(tlpServer));
 
             // ── SAMPLING TAB ────────────────────────────────────────────
@@ -578,11 +602,11 @@ namespace LlamaServerLauncher
 
 
             void refreshPreview(object s, System.EventArgs e) => UpdateCommandPreview();
-            foreach (var n in new NumericUpDown[] { nudGpuLayers, nudCtxSize, nudPort, nudThreads, nudParallel, nudBatchSize, nudUBatchSize, nudTemperature, nudTopK, nudTopP, nudMinP, nudSeed, nudRepeatPenalty })
+            foreach (var n in new NumericUpDown[] { nudGpuLayers, nudCtxSize, nudPort, nudThreads, nudThreadsBatch, nudParallel, nudBatchSize, nudUBatchSize, nudDefragThold, nudCacheReuse, nudTemperature, nudTopK, nudTopP, nudMinP, nudSeed, nudRepeatPenalty })
                 n.ValueChanged += refreshPreview;
-            foreach (var c in new CheckBox[] { chkFlashAttn, chkContBatching, chkMmap, chkMlock, chkEmbedding, chkRerank, chkMetrics, chkThreadsAuto, chkCtxDefault, chkSeedRandom, chkMmproj })
+            foreach (var c in new CheckBox[] { chkFlashAttn, chkContBatching, chkMmap, chkMlock, chkEmbedding, chkRerank, chkMetrics, chkThreadsAuto, chkThreadsBatchAuto, chkCtxDefault, chkSeedRandom, chkMmproj, chkKvOffload, chkContextShift })
                 c.CheckedChanged += refreshPreview;
-            foreach (var c in new ComboBox[] { cbModel, cbCacheK, cbCacheV, cbReasoning, cbNglMode })
+            foreach (var c in new ComboBox[] { cbModel, cbCacheK, cbCacheV, cbReasoning, cbNglMode, cbSplitMode })
                 c.SelectedIndexChanged += refreshPreview;
             foreach (var r in new RadioButton[] { rdoHostLocal, rdoHostAll, rdoHostCustom })
                 r.CheckedChanged += refreshPreview;
@@ -590,8 +614,8 @@ namespace LlamaServerLauncher
                 t.TextChanged += refreshPreview;
 
             // ── Form ──────────────────────────────────────────────────────
-            this.ClientSize   = new Size(1320, 1024);
-            this.MinimumSize  = new Size(1100, 720);
+            this.ClientSize   = new Size(1320, 1200);
+            this.MinimumSize  = new Size(1100, 900);
             this.Controls.Add(this.tlpMain);
             this.FormBorderStyle = FormBorderStyle.Sizable;
             this.StartPosition   = FormStartPosition.CenterScreen;

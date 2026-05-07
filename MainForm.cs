@@ -203,6 +203,8 @@ namespace LlamaServerLauncher
                 sb.Append($" --port {nudPort.Value}");
             if (!chkThreadsAuto.Checked)
                 sb.Append($" --threads {nudThreads.Value}");
+            if (!chkThreadsBatchAuto.Checked)
+                sb.Append($" -tb {nudThreadsBatch.Value}");
             if (nudBatchSize.Value != 2048)
                 sb.Append($" -b {nudBatchSize.Value}");
             if (nudUBatchSize.Value != 512)
@@ -218,6 +220,8 @@ namespace LlamaServerLauncher
                 sb.Append(" --flash-attn on");
             if (chkContBatching.Checked)
                 sb.Append(" -cb");
+            if (!chkContextShift.Checked)
+                sb.Append(" --no-context-shift");
 
             // Cache
             if (cbCacheK.Text != "f16")
@@ -228,6 +232,12 @@ namespace LlamaServerLauncher
                 sb.Append(" --no-mmap");
             if (chkMlock.Checked)
                 sb.Append(" --mlock");
+            if (!chkKvOffload.Checked)
+                sb.Append(" --no-kv-offload");
+            if (cbSplitMode.Text != "layer")
+                sb.Append($" --split-mode {cbSplitMode.Text}");
+            if (nudDefragThold.Value >= 0)
+                sb.Append($" -dt {nudDefragThold.Value.ToString("F2", ci)}");
 
             // Reasoning
             if (cbReasoning.Text != "auto")
@@ -246,6 +256,9 @@ namespace LlamaServerLauncher
                 sb.Append($" --repeat-penalty {nudRepeatPenalty.Value.ToString("F2", ci)}");
             if (!chkSeedRandom.Checked)
                 sb.Append($" --seed {nudSeed.Value}");
+
+            if (nudCacheReuse.Value > 0)
+                sb.Append($" --cache-reuse {nudCacheReuse.Value}");
 
             // Tools
             if (!string.IsNullOrWhiteSpace(txtTools.Text))
@@ -702,20 +715,27 @@ namespace LlamaServerLauncher
             if (s.CacheKIndex    >= 0 && s.CacheKIndex    < cbCacheK.Items.Count)    cbCacheK.SelectedIndex    = s.CacheKIndex;
             if (s.CacheVIndex    >= 0 && s.CacheVIndex    < cbCacheV.Items.Count)    cbCacheV.SelectedIndex    = s.CacheVIndex;
             if (s.ReasoningIndex >= 0 && s.ReasoningIndex < cbReasoning.Items.Count) cbReasoning.SelectedIndex = s.ReasoningIndex;
-            chkThreadsAuto.Checked      = s.ThreadsAuto;
-            nudThreads.Value            = Clamp(s.Threads, nudThreads);
-            nudParallel.Value           = Clamp(s.Parallel, nudParallel);
-            chkFlashAttn.Checked        = s.FlashAttn;
-            chkContBatching.Checked     = s.ContBatching;
-            chkMmap.Checked             = s.Mmap;
-            chkMlock.Checked            = s.Mlock;
+            chkThreadsAuto.Checked       = s.ThreadsAuto;
+            nudThreads.Value             = Clamp(s.Threads, nudThreads);
+            chkThreadsBatchAuto.Checked  = s.ThreadsBatchAuto;
+            nudThreadsBatch.Value        = Clamp(s.ThreadsBatch, nudThreadsBatch);
+            nudParallel.Value            = Clamp(s.Parallel, nudParallel);
+            chkFlashAttn.Checked         = s.FlashAttn;
+            chkContBatching.Checked      = s.ContBatching;
+            chkContextShift.Checked      = s.ContextShift;
+            chkMmap.Checked              = s.Mmap;
+            chkMlock.Checked             = s.Mlock;
+            chkKvOffload.Checked         = s.KvOffload;
+            if (s.SplitModeIndex >= 0 && s.SplitModeIndex < cbSplitMode.Items.Count) cbSplitMode.SelectedIndex = s.SplitModeIndex;
+            nudDefragThold.Value         = Clamp(s.DefragThold, nudDefragThold);
 
             string host = s.Host ?? "127.0.0.1";
             if (host == "0.0.0.0")      rdoHostAll.Checked    = true;
             else if (host == "127.0.0.1") rdoHostLocal.Checked = true;
             else { rdoHostCustom.Checked = true; txtHostCustom.Text = host; }
-            nudPort.Value               = Clamp(s.Port, nudPort);
-            txtTools.Text               = s.Tools ?? "";
+            nudPort.Value                = Clamp(s.Port, nudPort);
+            txtTools.Text                = s.Tools ?? "";
+            nudCacheReuse.Value          = Clamp(s.CacheReuse, nudCacheReuse);
 
             nudTemperature.Value        = Clamp(s.Temperature, nudTemperature);
             nudTopK.Value               = Clamp(s.TopK, nudTopK);
@@ -751,16 +771,23 @@ namespace LlamaServerLauncher
                 CacheKIndex    = cbCacheK.SelectedIndex,
                 CacheVIndex    = cbCacheV.SelectedIndex,
                 ReasoningIndex = cbReasoning.SelectedIndex,
-                ThreadsAuto    = chkThreadsAuto.Checked,
-                Threads        = (int)nudThreads.Value,
-                Parallel       = (int)nudParallel.Value,
-                FlashAttn      = chkFlashAttn.Checked,
-                ContBatching   = chkContBatching.Checked,
-                Mmap           = chkMmap.Checked,
-                Mlock          = chkMlock.Checked,
-                Host           = HostValue,
-                Port           = (int)nudPort.Value,
-                Tools          = txtTools.Text,
+                ThreadsAuto      = chkThreadsAuto.Checked,
+                Threads          = (int)nudThreads.Value,
+                ThreadsBatchAuto = chkThreadsBatchAuto.Checked,
+                ThreadsBatch     = (int)nudThreadsBatch.Value,
+                Parallel         = (int)nudParallel.Value,
+                FlashAttn        = chkFlashAttn.Checked,
+                ContBatching     = chkContBatching.Checked,
+                ContextShift     = chkContextShift.Checked,
+                Mmap             = chkMmap.Checked,
+                Mlock            = chkMlock.Checked,
+                KvOffload        = chkKvOffload.Checked,
+                SplitModeIndex   = cbSplitMode.SelectedIndex,
+                DefragThold      = nudDefragThold.Value,
+                Host             = HostValue,
+                Port             = (int)nudPort.Value,
+                Tools            = txtTools.Text,
+                CacheReuse       = (int)nudCacheReuse.Value,
                 Temperature    = nudTemperature.Value,
                 TopK           = (int)nudTopK.Value,
                 TopP           = nudTopP.Value,
@@ -1375,24 +1402,29 @@ namespace LlamaServerLauncher
 #pragma warning disable CS8632
         private record PerfParams(
             int CtxSize, int GpuLayers, int Threads, int BatchSize, int UbatchSize, bool FlashAttn,
-            string CacheTypeK = "f16", string CacheTypeV = "f16", string MmprojPath = "")
+            string CacheTypeK = "f16", string CacheTypeV = "f16", string MmprojPath = "",
+            int ThreadsBatch = -1, string SplitMode = "layer", bool KvOffload = true, bool ContextShift = true)
         {
             public string ToLabel()
             {
                 var parts = new List<string>();
-                if (CtxSize    > 0)                        parts.Add($"ctx={CtxSize:N0}");
-                if (GpuLayers  >= 0)                       parts.Add($"ngl={GpuLayers}");
-                if (Threads    >= 0)                       parts.Add($"t={Threads}");
-                if (BatchSize  > 0)                        parts.Add($"batch={BatchSize}");
-                if (UbatchSize > 0)                        parts.Add($"ubatch={UbatchSize}");
+                if (CtxSize      > 0)                      parts.Add($"ctx={CtxSize:N0}");
+                if (GpuLayers    >= 0)                     parts.Add($"ngl={GpuLayers}");
+                if (Threads      >= 0)                     parts.Add($"t={Threads}");
+                if (ThreadsBatch >= 0)                     parts.Add($"tb={ThreadsBatch}");
+                if (BatchSize    > 0)                      parts.Add($"batch={BatchSize}");
+                if (UbatchSize   > 0)                      parts.Add($"ubatch={UbatchSize}");
                 if (FlashAttn)                             parts.Add("flash=yes");
-                if (CacheTypeK != "f16")                   parts.Add($"ctk={CacheTypeK}");
-                if (CacheTypeV != "f16")                   parts.Add($"ctv={CacheTypeV}");
+                if (CacheTypeK  != "f16")                  parts.Add($"ctk={CacheTypeK}");
+                if (CacheTypeV  != "f16")                  parts.Add($"ctv={CacheTypeV}");
+                if (SplitMode   != "layer")                parts.Add($"sm={SplitMode}");
+                if (!KvOffload)                            parts.Add("no-kvo");
+                if (!ContextShift)                         parts.Add("no-ctx-shift");
                 if (!string.IsNullOrEmpty(MmprojPath))     parts.Add($"mmproj={Path.GetFileName(MmprojPath)}");
                 return parts.Count > 0 ? string.Join("  ", parts) : "(all defaults)";
             }
 
-            public string ToKey() => $"{CtxSize}|{GpuLayers}|{Threads}|{BatchSize}|{UbatchSize}|{FlashAttn}|{CacheTypeK}|{CacheTypeV}|{MmprojPath}";
+            public string ToKey() => $"{CtxSize}|{GpuLayers}|{Threads}|{ThreadsBatch}|{BatchSize}|{UbatchSize}|{FlashAttn}|{CacheTypeK}|{CacheTypeV}|{SplitMode}|{KvOffload}|{ContextShift}|{MmprojPath}";
         }
 
         private sealed class PerfConfigItem
@@ -1443,14 +1475,20 @@ namespace LlamaServerLauncher
             if (p.Threads == -1) chkThreadsAuto.Checked = true;
             else { chkThreadsAuto.Checked = false; nudThreads.Value = Clamp(p.Threads, nudThreads); }
 
+            if (p.ThreadsBatch == -1) chkThreadsBatchAuto.Checked = true;
+            else { chkThreadsBatchAuto.Checked = false; nudThreadsBatch.Value = Clamp(p.ThreadsBatch, nudThreadsBatch); }
+
             if (p.CtxSize == 0) chkCtxDefault.Checked = true;
             else { chkCtxDefault.Checked = false; nudCtxSize.Value = Clamp(p.CtxSize, nudCtxSize); }
 
-            nudBatchSize.Value   = Clamp(p.BatchSize  > 0 ? p.BatchSize  : 2048, nudBatchSize);
-            nudUBatchSize.Value  = Clamp(p.UbatchSize > 0 ? p.UbatchSize : 512,  nudUBatchSize);
-            chkFlashAttn.Checked = p.FlashAttn;
+            nudBatchSize.Value    = Clamp(p.BatchSize  > 0 ? p.BatchSize  : 2048, nudBatchSize);
+            nudUBatchSize.Value   = Clamp(p.UbatchSize > 0 ? p.UbatchSize : 512,  nudUBatchSize);
+            chkFlashAttn.Checked  = p.FlashAttn;
+            chkKvOffload.Checked  = p.KvOffload;
+            chkContextShift.Checked = p.ContextShift;
             SelectCombo(cbCacheK, p.CacheTypeK);
             SelectCombo(cbCacheV, p.CacheTypeV);
+            SelectCombo(cbSplitMode, p.SplitMode);
 
             _mmprojPath             = p.MmprojPath ?? "";
             txtMmprojPath.Text      = _mmprojPath;
@@ -1463,6 +1501,8 @@ namespace LlamaServerLauncher
             chkContBatching.Checked    = false;
             chkMmap.Checked            = true;
             chkMlock.Checked           = false;
+            nudDefragThold.Value       = Clamp(-1M, nudDefragThold);
+            nudCacheReuse.Value        = 0;
             cbReasoning.SelectedIndex  = 0;   // auto
             nudTemperature.Value       = Clamp(0.80M, nudTemperature);
             nudTopK.Value              = Clamp(40,    nudTopK);
@@ -1493,15 +1533,22 @@ namespace LlamaServerLauncher
             public int     CacheVIndex    { get; set; } = 0;
             public int     ReasoningIndex { get; set; } = 0;
             public bool    ThreadsAuto    { get; set; } = true;
-            public decimal Threads        { get; set; } = 4;
-            public decimal Parallel       { get; set; } = 1;
-            public bool    FlashAttn      { get; set; } = false;
-            public bool    ContBatching   { get; set; } = false;
-            public bool    Mmap           { get; set; } = true;
-            public bool    Mlock          { get; set; } = false;
-            public string  Host           { get; set; } = "127.0.0.1";
-            public decimal Port           { get; set; } = 8080;
-            public string  Tools          { get; set; } = "";
+            public decimal Threads           { get; set; } = 4;
+            public bool    ThreadsBatchAuto  { get; set; } = true;
+            public decimal ThreadsBatch      { get; set; } = 4;
+            public decimal Parallel          { get; set; } = 1;
+            public bool    FlashAttn         { get; set; } = false;
+            public bool    ContBatching      { get; set; } = false;
+            public bool    ContextShift      { get; set; } = true;
+            public bool    Mmap              { get; set; } = true;
+            public bool    Mlock             { get; set; } = false;
+            public bool    KvOffload         { get; set; } = true;
+            public int     SplitModeIndex    { get; set; } = 0;
+            public decimal DefragThold       { get; set; } = -1M;
+            public string  Host              { get; set; } = "127.0.0.1";
+            public decimal Port              { get; set; } = 8080;
+            public string  Tools             { get; set; } = "";
+            public decimal CacheReuse        { get; set; } = 0;
             public decimal Temperature    { get; set; } = 0.80M;
             public decimal TopK           { get; set; } = 40;
             public decimal TopP           { get; set; } = 0.95M;
@@ -1518,15 +1565,17 @@ namespace LlamaServerLauncher
             public string  MmprojPath        { get; set; } = "";
         }
 
-        private static readonly Regex _rxCtx      = new(@"(?:-c|--ctx-size)\s+(\d+)",       RegexOptions.Compiled);
-        private static readonly Regex _rxNgl      = new(@"(?:-ngl|--n-gpu-layers)\s+(\d+)", RegexOptions.Compiled);
-        private static readonly Regex _rxT        = new(@"(?:-t|--threads)\s+(\d+)",        RegexOptions.Compiled);
-        private static readonly Regex _rxBatch    = new(@"(?:-b|--batch-size)\s+(\d+)",     RegexOptions.Compiled);
-        private static readonly Regex _rxUbatch   = new(@"(?:-ub|--ubatch-size)\s+(\d+)",   RegexOptions.Compiled);
-        private static readonly Regex _rxCacheK   = new(@"--cache-type-k\s+(\S+)",          RegexOptions.Compiled);
-        private static readonly Regex _rxCacheV   = new(@"--cache-type-v\s+(\S+)",          RegexOptions.Compiled);
-        private static readonly Regex _rxMmproj   = new(@"--mmproj\s+""([^""]+)""",         RegexOptions.Compiled);
-        private static readonly Regex _rxModelArg = new(@"-m\s+""[^""]*""\s*",              RegexOptions.Compiled);
+        private static readonly Regex _rxCtx        = new(@"(?:-c|--ctx-size)\s+(\d+)",         RegexOptions.Compiled);
+        private static readonly Regex _rxNgl        = new(@"(?:-ngl|--n-gpu-layers)\s+(\d+)",   RegexOptions.Compiled);
+        private static readonly Regex _rxT          = new(@"(?:-t|--threads)\s+(\d+)",          RegexOptions.Compiled);
+        private static readonly Regex _rxTb         = new(@"-tb\s+(\d+)",                       RegexOptions.Compiled);
+        private static readonly Regex _rxBatch      = new(@"(?:-b|--batch-size)\s+(\d+)",       RegexOptions.Compiled);
+        private static readonly Regex _rxUbatch     = new(@"(?:-ub|--ubatch-size)\s+(\d+)",     RegexOptions.Compiled);
+        private static readonly Regex _rxCacheK     = new(@"--cache-type-k\s+(\S+)",            RegexOptions.Compiled);
+        private static readonly Regex _rxCacheV     = new(@"--cache-type-v\s+(\S+)",            RegexOptions.Compiled);
+        private static readonly Regex _rxSplitMode  = new(@"--split-mode\s+(\S+)",              RegexOptions.Compiled);
+        private static readonly Regex _rxMmproj     = new(@"--mmproj\s+""([^""]+)""",           RegexOptions.Compiled);
+        private static readonly Regex _rxModelArg   = new(@"-m\s+""[^""]*""\s*",               RegexOptions.Compiled);
 
         private static string StripModelArg(string args)
         {
@@ -1543,15 +1592,19 @@ namespace LlamaServerLauncher
             bool HasFlag(string s) => args.Contains(s);
 
             return new PerfParams(
-                CtxSize:    GetInt(_rxCtx),
-                GpuLayers:  GetInt(_rxNgl, absent: -1),
-                Threads:    GetInt(_rxT,   absent: -1),
-                BatchSize:  GetInt(_rxBatch),
-                UbatchSize: GetInt(_rxUbatch),
-                FlashAttn:  HasFlag("--flash-attn") || HasFlag("-fa"),
-                CacheTypeK: GetStr(_rxCacheK, "f16"),
-                CacheTypeV: GetStr(_rxCacheV, "f16"),
-                MmprojPath: GetStr(_rxMmproj, ""));
+                CtxSize:      GetInt(_rxCtx),
+                GpuLayers:    GetInt(_rxNgl,  absent: -1),
+                Threads:      GetInt(_rxT,    absent: -1),
+                BatchSize:    GetInt(_rxBatch),
+                UbatchSize:   GetInt(_rxUbatch),
+                FlashAttn:    HasFlag("--flash-attn") || HasFlag("-fa"),
+                CacheTypeK:   GetStr(_rxCacheK, "f16"),
+                CacheTypeV:   GetStr(_rxCacheV, "f16"),
+                MmprojPath:   GetStr(_rxMmproj, ""),
+                ThreadsBatch: GetInt(_rxTb, absent: -1),
+                SplitMode:    GetStr(_rxSplitMode, "layer"),
+                KvOffload:    !HasFlag("--no-kv-offload"),
+                ContextShift: !HasFlag("--no-context-shift"));
         }
     }
 }
