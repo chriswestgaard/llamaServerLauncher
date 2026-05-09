@@ -199,25 +199,35 @@ namespace LlamaServerLauncher
             };
             AddRow(tlpModel, 1, MakeLbl("Image Input  (--mmproj)"), tlpMmprojRow, "Load a multimodal projector (.gguf) to enable image/vision input.\nRequired for vision-capable models such as LLaVA or Qwen-VL.\n(--mmproj)");
 
-            // ── 2-column performance settings (row 1) ────────────────────
-            var tlpPerfCols = new TableLayoutPanel
-            {
-                AutoSize = true, Dock = DockStyle.Top,
-                ColumnCount = 2, RowCount = 1, Margin = new Padding(0),
-                MinimumSize = new Size(0, 60)
-            };
-            tlpPerfCols.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-            tlpPerfCols.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50F));
-            tlpPerfCols.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-
-            var tlpPerfL = MakeTlp(10);
+            // ── GroupBox: GPU & Threading (left half, row 2) ─────────────
+            var tlpGpuThreading = MakeTlp(5);
 
             var pnlNgl = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
             pnlNgl.Controls.Add(this.cbNglMode);
             pnlNgl.Controls.Add(this.nudGpuLayers);
             pnlNgl.Controls.Add(this.lblLayerCount);
             this.cbNglMode.SelectedIndexChanged += (_, _) => this.nudGpuLayers.Visible = this.cbNglMode.SelectedIndex == 3;
-            AddRow(tlpPerfL, 0, MakeLbl("GPU Layers  (-ngl)"),  pnlNgl, "Number of model layers to offload to GPU VRAM.\nAuto  = server decides at startup.\nCPU only  = no GPU offload.\nGPU only  = all layers (passes -ngl 999).\nCustom  = specify exact layer count. (-ngl)");
+            AddRow(tlpGpuThreading, 0, MakeLbl("GPU Layers  (-ngl)"), pnlNgl, "Number of model layers to offload to GPU VRAM.\nAuto  = server decides at startup.\nCPU only  = no GPU offload.\nGPU only  = all layers (passes -ngl 999).\nCustom  = specify exact layer count. (-ngl)");
+            AddRow(tlpGpuThreading, 1, MakeLbl("Split Mode  (-sm)"),  this.cbSplitMode, "Multi-GPU tensor split strategy (default: layer).\nlayer  = split by layers across GPUs.\nnone   = single GPU only.\nrow    = split by matrix rows.\ntensor = split by tensor dimensions. (-sm)");
+
+            var pnlThreads = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+            pnlThreads.Controls.Add(this.chkThreadsAuto);
+            pnlThreads.Controls.Add(this.nudThreads);
+            this.chkThreadsAuto.CheckedChanged += (_, _) => this.nudThreads.Visible = !this.chkThreadsAuto.Checked;
+            AddRow(tlpGpuThreading, 2, MakeLbl("Threads  (-t)"), pnlThreads, "CPU threads used during generation.\nAuto = server detects from CPU core count.\nFor best results, match to physical core count. (-t)");
+
+            var pnlThreadsBatch = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+            pnlThreadsBatch.Controls.Add(this.chkThreadsBatchAuto);
+            pnlThreadsBatch.Controls.Add(this.nudThreadsBatch);
+            this.chkThreadsBatchAuto.CheckedChanged += (_, _) => this.nudThreadsBatch.Visible = !this.chkThreadsBatchAuto.Checked;
+            AddRow(tlpGpuThreading, 3, MakeLbl("Threads Batch  (-tb)"), pnlThreadsBatch, "CPU threads used during prompt processing / prefill.\nAuto = same as generation threads.\nSet higher than generation threads to speed up long prompts. (-tb)");
+            AddRow(tlpGpuThreading, 4, MakeLbl("Parallel Slots  (-np)"), this.nudParallel, "Number of parallel sequences to decode (default: 1).\nEach slot reserves additional KV-cache memory. (-np)");
+
+            var grpGpuThreading = MakeGroup("GPU && Threading");
+            grpGpuThreading.Controls.Add(tlpGpuThreading);
+
+            // ── GroupBox: Context & Cache (right half, row 2) ────────────
+            var tlpCtxCache = MakeTlp(7);
 
             var tlpCtx = new TableLayoutPanel
             {
@@ -236,37 +246,44 @@ namespace LlamaServerLauncher
                 this.lblCtxSize.Visible = this.chkCtxDefault.Checked;
                 this.nudCtxSize.Visible = !this.chkCtxDefault.Checked;
             };
-            AddRow(tlpPerfL, 1, MakeLbl("Context Size  (-c)"), tlpCtx, "Maximum number of tokens in the context window.\n\"Model default\" uses the value embedded in the model file.\nLarger contexts require more VRAM/RAM. (-c)");
-            AddRow(tlpPerfL, 2, MakeLbl("Batch Size  (-b)"),     this.nudBatchSize,  "Logical maximum batch size (default: 2048).\nLarger values improve prompt-processing throughput. (-b)");
-            AddRow(tlpPerfL, 3, MakeLbl("UBatch Size  (-ub)"),   this.nudUBatchSize, "Physical maximum batch size (default: 512).\nSmaller values reduce peak VRAM usage. (-ub)");
-            AddRow(tlpPerfL, 4, MakeLbl("Cache Type K  (-ctk)"), this.cbCacheK,      "KV cache data type for Keys (default: f16).\nAllowed: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1.\nbf16 / q8_0 saves VRAM with minor quality loss. (-ctk)");
-            AddRow(tlpPerfL, 5, MakeLbl("Cache Type V  (-ctv)"), this.cbCacheV,      "KV cache data type for Values (default: f16).\nSame options as Cache Type K. (-ctv)");
-            AddRow(tlpPerfL, 6, MakeLbl("Reasoning  (-rea)"),    this.cbReasoning,   "Use reasoning/thinking in chat (default: auto).\n'auto' = detect from model template.\n'on'   = enable reasoning tokens.\n'off'  = disable reasoning. (-rea)");
-            AddRow(tlpPerfL, 7, MakeLbl("Split Mode  (-sm)"),    this.cbSplitMode,   "Multi-GPU tensor split strategy (default: layer).\nlayer  = split by layers across GPUs.\nnone   = single GPU only.\nrow    = split by matrix rows.\ntensor = split by tensor dimensions. (-sm)");
-            AddChk(tlpPerfL, 8, this.chkKvOffload,               "Offload KV cache to GPU VRAM (default: on).\nUncheck to keep KV cache in system RAM — useful when VRAM is tight.\n(-nkvo / --no-kv-offload)");
-            AddRow(tlpPerfL, 9, MakeLbl("Defrag Threshold (-dt)"), this.nudDefragThold, "KV cache defragmentation threshold (default: -1 = disabled).\n0.0–1.0 = trigger defrag when fragmentation exceeds this ratio.\nHelps with long sessions that cycle many slots. (-dt)");
+            AddRow(tlpCtxCache, 0, MakeLbl("Context Size  (-c)"),    tlpCtx,             "Maximum number of tokens in the context window.\n\"Model default\" uses the value embedded in the model file.\nLarger contexts require more VRAM/RAM. (-c)");
+            AddRow(tlpCtxCache, 1, MakeLbl("Batch Size  (-b)"),      this.nudBatchSize,  "Logical maximum batch size (default: 2048).\nLarger values improve prompt-processing throughput. (-b)");
+            AddRow(tlpCtxCache, 2, MakeLbl("UBatch Size  (-ub)"),    this.nudUBatchSize, "Physical maximum batch size (default: 512).\nSmaller values reduce peak VRAM usage. (-ub)");
+            AddRow(tlpCtxCache, 3, MakeLbl("Cache Type K  (-ctk)"),  this.cbCacheK,      "KV cache data type for Keys (default: f16).\nAllowed: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1.\nbf16 / q8_0 saves VRAM with minor quality loss. (-ctk)");
+            AddRow(tlpCtxCache, 4, MakeLbl("Cache Type V  (-ctv)"),  this.cbCacheV,      "KV cache data type for Values (default: f16).\nSame options as Cache Type K. (-ctv)");
+            AddChk(tlpCtxCache, 5, this.chkKvOffload,                "Offload KV cache to GPU VRAM (default: on).\nUncheck to keep KV cache in system RAM — useful when VRAM is tight.\n(-nkvo / --no-kv-offload)");
+            AddRow(tlpCtxCache, 6, MakeLbl("Defrag Threshold (-dt)"), this.nudDefragThold, "KV cache defragmentation threshold (default: -1 = disabled).\n0.0–1.0 = trigger defrag when fragmentation exceeds this ratio.\nHelps with long sessions that cycle many slots. (-dt)");
 
-            var tlpPerfR = MakeTlp(8);
-            var pnlThreads = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
-            pnlThreads.Controls.Add(this.chkThreadsAuto);
-            pnlThreads.Controls.Add(this.nudThreads);
-            this.chkThreadsAuto.CheckedChanged += (_, _) => this.nudThreads.Visible = !this.chkThreadsAuto.Checked;
-            AddRow(tlpPerfR, 0, MakeLbl("Threads  (-t)"),  pnlThreads, "CPU threads used during generation.\nAuto = server detects from CPU core count.\nFor best results, match to physical core count. (-t)");
-            AddRow(tlpPerfR, 1, MakeLbl("Parallel Slots  (-np)"), this.nudParallel, "Number of parallel sequences to decode (default: 1).\nEach slot reserves additional KV-cache memory. (-np)");
-            AddChk(tlpPerfR, 2, this.chkFlashAttn,    "Flash Attention: faster inference and lower VRAM usage (default: auto).\nChecked = force on; unchecked = use default (auto).\nRequires a compatible model. (-fa)");
-            AddChk(tlpPerfR, 3, this.chkContBatching, "Process new requests without waiting for current ones to finish.\nImproves throughput under concurrent load. (-cb)");
-            AddChk(tlpPerfR, 4, this.chkMmap,  "Memory-map model for faster load (default: enabled).\nUncheck to fully load into RAM (--no-mmap). (--mmap)");
-            AddChk(tlpPerfR, 5, this.chkMlock, "Force system to keep model in RAM rather than swapping.\nRequires sufficient free RAM. (--mlock)");
-            var pnlThreadsBatch = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
-            pnlThreadsBatch.Controls.Add(this.chkThreadsBatchAuto);
-            pnlThreadsBatch.Controls.Add(this.nudThreadsBatch);
-            this.chkThreadsBatchAuto.CheckedChanged += (_, _) => this.nudThreadsBatch.Visible = !this.chkThreadsBatchAuto.Checked;
-            AddRow(tlpPerfR, 6, MakeLbl("Threads Batch  (-tb)"), pnlThreadsBatch, "CPU threads used during prompt processing / prefill.\nAuto = same as generation threads.\nSet higher than generation threads to speed up long prompts. (-tb)");
-            AddChk(tlpPerfR, 7, this.chkContextShift, "Shift context window when full instead of erroring (default: on).\nUncheck (--no-context-shift) to return an error when context is exhausted.\nLeave on for infinite generation / long conversations.");
+            var grpCtxCache = MakeGroup("Context && Cache");
+            grpCtxCache.Controls.Add(tlpCtxCache);
 
-            tlpPerfCols.Controls.Add(tlpPerfL, 0, 0);
-            tlpPerfCols.Controls.Add(tlpPerfR, 1, 0);
-            Span3(tlpModel, tlpPerfCols, 0, 2);
+            // ── GroupBox: Features (right third, row 2) ──────────────────
+            var tlpFeatures = MakeTlp(6);
+            AddRow(tlpFeatures, 0, MakeLbl("Reasoning  (-rea)"),    this.cbReasoning,   "Use reasoning/thinking in chat (default: auto).\n'auto' = detect from model template.\n'on'   = enable reasoning tokens.\n'off'  = disable reasoning. (-rea)");
+            AddChk(tlpFeatures, 1, this.chkFlashAttn,    "Flash Attention: faster inference and lower VRAM usage (default: auto).\nChecked = force on; unchecked = use default (auto).\nRequires a compatible model. (-fa)");
+            AddChk(tlpFeatures, 2, this.chkContBatching, "Process new requests without waiting for current ones to finish.\nImproves throughput under concurrent load. (-cb)");
+            AddChk(tlpFeatures, 3, this.chkMmap,         "Memory-map model for faster load (default: enabled).\nUncheck to fully load into RAM (--no-mmap). (--mmap)");
+            AddChk(tlpFeatures, 4, this.chkMlock,        "Force system to keep model in RAM rather than swapping.\nRequires sufficient free RAM. (--mlock)");
+            AddChk(tlpFeatures, 5, this.chkContextShift, "Shift context window when full instead of erroring (default: on).\nUncheck (--no-context-shift) to return an error when context is exhausted.\nLeave on for infinite generation / long conversations.");
+
+            var grpFeatures = MakeGroup("Features");
+            grpFeatures.Controls.Add(tlpFeatures);
+
+            // ── Three GroupBoxes side by side (row 2) ────────────────────
+            var tlpParamCols = new TableLayoutPanel
+            {
+                AutoSize = true, Dock = DockStyle.Top,
+                ColumnCount = 3, RowCount = 1, Margin = new Padding(0),
+                MinimumSize = new Size(0, 60)
+            };
+            tlpParamCols.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33F));
+            tlpParamCols.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33F));
+            tlpParamCols.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.34F));
+            tlpParamCols.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            tlpParamCols.Controls.Add(grpGpuThreading, 0, 0);
+            tlpParamCols.Controls.Add(grpCtxCache,     1, 0);
+            tlpParamCols.Controls.Add(grpFeatures,     2, 0);
+            Span3(tlpModel, tlpParamCols, 0, 2);
 
             // ── Hardware heading (row 3) ──────────────────────────────────
             var lblHwSep = new Label { Text = "Hardware", AutoSize = false, Dock = DockStyle.Fill, ForeColor = System.Drawing.Color.Gray, Font = new Font(Font, FontStyle.Bold), Margin = new Padding(2, 6, 2, 6) };
@@ -614,8 +631,8 @@ namespace LlamaServerLauncher
                 t.TextChanged += refreshPreview;
 
             // ── Form ──────────────────────────────────────────────────────
-            this.ClientSize   = new Size(1320, 1200);
-            this.MinimumSize  = new Size(1100, 900);
+            this.ClientSize   = new Size(1500, 1200);
+            this.MinimumSize  = new Size(1280, 900);
             this.Controls.Add(this.tlpMain);
             this.FormBorderStyle = FormBorderStyle.Sizable;
             this.StartPosition   = FormStartPosition.CenterScreen;
@@ -689,6 +706,17 @@ namespace LlamaServerLauncher
             tlp.Controls.Add(left,  0, 0);
             tlp.Controls.Add(right, 1, 0);
             return tlp;
+        }
+
+        private static GroupBox MakeGroup(string title)
+        {
+            return new GroupBox
+            {
+                Text = title,
+                Dock = DockStyle.Fill,
+                AutoSize = true,
+                Padding = new Padding(4, 6, 4, 4)
+            };
         }
 
         private Label MakeInfo(string tooltip)

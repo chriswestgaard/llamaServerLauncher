@@ -42,3 +42,6 @@ claude.md
 
 # Configuration files
 config.json
+
+# Others
+*.bat
