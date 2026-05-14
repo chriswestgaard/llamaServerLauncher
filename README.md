@@ -2,7 +2,7 @@
 
 A Windows desktop GUI for launching and managing [llama-server](https://github.com/ggml-org/llama.cpp) (llama.cpp).
 
-<img width="1311" height="1050" alt="screenshot" align="center" src="https://github.com/user-attachments/assets/db5024f0-ce97-46b5-93f9-a0a4da9e352f" />
+<img width="1919" height="1015" alt="Screenshot 2026-05-11 215555" src="https://github.com/user-attachments/assets/70fe4216-4e30-4dba-baf7-72571d4a981f" />
 
 ## Features
 
@@ -74,7 +74,7 @@ API key, embedding mode, reranking mode, Prometheus metrics endpoint, custom ext
 
 After running the server and sending requests, the **Perf** tab shows each model with its best recorded tokens/sec. Expand a model to see results per configuration. Double-click a result row to load that configuration back into the controls.
 
-<img width="488" height="237" alt="screenshot2" src="https://github.com/user-attachments/assets/8164c114-74bc-4059-9a63-2b59c8af904e" />
+<img width="743" height="266" alt="Screenshot 2026-05-14 132949" src="https://github.com/user-attachments/assets/b5ec81a1-b3d9-4ab5-a9e2-375a92c44c90" />
 
 
 ## Building from Source
