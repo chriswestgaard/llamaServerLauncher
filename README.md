@@ -29,6 +29,13 @@ A Windows desktop GUI for launching and managing [llama-server](https://github.c
 5. Click **Launch llama-server**
 6. Click **Open Chat UI** to open the web interface
 
+## Workflow
+
+1. **Start with defaults** — they work for most cases; launch the server and verify it responds.
+2. **Profile** — send a few requests and check the **Perf** tab for tokens/sec, then watch the live graphs for CPU, GPU, and memory pressure.
+3. **Tweak** — change one setting at a time (GPU layers, context size, cache type, etc.) and note the effect.
+4. **Iterate** — repeat until you find the sweet spot between speed, resource usage, and output quality.
+
 ## Settings
 
 ### Model tab
