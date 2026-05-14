@@ -43,6 +43,7 @@ namespace LlamaServerLauncher
             private int _ctxMax, _ctxCurrent;
         private volatile bool _pollingSlotsInProgress;
         private volatile bool _serverReady;
+        private string _chatUiUrl;
         private volatile bool _fitAbortedNgl999;
         private volatile bool _fitSuccessNotified;
         private int _fitReducedCtxSize;
@@ -141,6 +142,7 @@ namespace LlamaServerLauncher
 
             bool isRunning = false;
             try { isRunning = _proc != null && !_proc.HasExited; } catch { }
+            btnOpenChat.Enabled = isRunning && _serverReady && !string.IsNullOrEmpty(_chatUiUrl);
             if (isRunning && !string.IsNullOrEmpty(_sessionArgs) && args != _sessionArgs)
             {
                 lblStatus.Text      = "Running  ⚠  restart to apply changes";
@@ -350,7 +352,9 @@ namespace LlamaServerLauncher
                         btnLaunch.Text      = "Launch llama-server";
                         btnLaunch.BackColor = System.Drawing.SystemColors.Control;
                         btnLaunch.ForeColor = System.Drawing.SystemColors.ControlText;
-                        btnOpenChat.Enabled = false;
+                        _serverReady = false;
+                        _chatUiUrl   = null;
+                        UpdateCommandPreview();
                         SavePerformanceSession(code);
                         UpdatePerformanceTips();
                     }));
@@ -376,6 +380,7 @@ namespace LlamaServerLauncher
                 _ctxMax = 0;
                 _ctxCurrent = 0;
                 _serverReady = false;
+                _chatUiUrl = null;
                 _fitAbortedNgl999   = false;
                 _fitSuccessNotified = false;
                 _fitReducedCtxSize  = 0;
@@ -387,7 +392,6 @@ namespace LlamaServerLauncher
                 btnLaunch.Text      = "Stop Server";
                 btnLaunch.BackColor = System.Drawing.SystemColors.Control;
                 btnLaunch.ForeColor = System.Drawing.SystemColors.ControlText;
-                btnOpenChat.Enabled = true;
             }
             catch (Exception ex)
             {
@@ -395,12 +399,7 @@ namespace LlamaServerLauncher
             }
         }
 
-        private void btnOpenChat_Click(object sender, EventArgs e)
-        {
-            var url = $"http://localhost:{nudPort.Value}/";
-            Process.Start(new ProcessStartInfo(url) { UseShellExecute = true });
-        }
-
+ 
 
         private void btnBrowse_Click(object sender, EventArgs e)
         {
@@ -421,7 +420,6 @@ namespace LlamaServerLauncher
             if (proc == null) return;
 
             btnLaunch.Enabled   = false;
-            btnOpenChat.Enabled = false;
             btnLaunch.Text      = "Stopping…";
             btnLaunch.BackColor = System.Drawing.SystemColors.Control;
             btnLaunch.ForeColor = System.Drawing.SystemColors.ControlText;
@@ -458,6 +456,94 @@ namespace LlamaServerLauncher
                 SaveConfig();
                 UpdateCommandPreview();
             }
+        }
+
+        private void btnOpenChat_Click(object sender, EventArgs e)
+        {
+            if (_proc == null || _proc.HasExited || string.IsNullOrEmpty(_chatUiUrl))
+            {
+                MessageBox.Show("Start the llama-server first before opening the Chat UI.", "Server not running", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                return;
+            }
+            string url = _chatUiUrl;
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = url,
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Failed to open Chat UI: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+        }
+
+        private void btnResetDefaults_Click(object sender, EventArgs e)
+        {
+            ApplyDefaults();
+        }
+
+        private void ApplyDefaults()
+        {
+            // Keep the selected model file
+            _savedModel = cbModel.SelectedItem?.ToString() ?? "";
+
+            // Model tab
+            chkNglAuto.Checked = true;
+            UpdateNglDisplay();
+            chkCtxDefault.Checked = true;
+            nudCtxSize.Value = 4096;
+            nudBatchSize.Value = 2048;
+            nudUBatchSize.Value = 512;
+            cbCacheK.SelectedIndex = 0;
+            cbCacheV.SelectedIndex = 0;
+            cbReasoning.SelectedIndex = 0;
+            chkThreadsAuto.Checked = true;
+            nudThreads.Value = 4;
+            chkThreadsBatchAuto.Checked = true;
+            nudThreadsBatch.Value = 4;
+            nudParallel.Value = 1;
+            chkFlashAttn.Checked = false;
+            chkContBatching.Checked = false;
+            chkContextShift.Checked = true;
+            chkMmap.Checked = true;
+            chkMlock.Checked = false;
+            chkKvOffload.Checked = true;
+            cbSplitMode.SelectedIndex = 0;
+            nudDefragThold.Value = -1M;
+
+            // Server tab
+            rdoHostLocal.Checked = true;
+            nudPort.Value = 8080;
+            txtTools.Text = "";
+            nudCacheReuse.Value = 0;
+
+            // Sampling tab
+            nudTemperature.Value = 0.80M;
+            nudTopK.Value = 40;
+            nudTopP.Value = 0.95M;
+            nudMinP.Value = 0.05M;
+            chkSeedRandom.Checked = true;
+            nudSeed.Value = 0;
+            nudRepeatPenalty.Value = 1.00M;
+
+            // Advanced tab
+            txtApiKey.Text = "";
+            chkEmbedding.Checked = false;
+            chkRerank.Checked = false;
+            chkMetrics.Checked = false;
+            txtExtraArgs.Text = "";
+            chkMmproj.Checked = false;
+            _mmprojPath = "";
+            txtMmprojPath.Text = "";
+            // Keep existing exe path
+
+            UpdateCommandPreview();
+
+            // Save defaults to config file (don't reload after)
+            SaveConfig();
         }
 
         private void btnBrowseExe_Click(object sender, EventArgs e)
@@ -866,11 +952,20 @@ namespace LlamaServerLauncher
         }
 
         private static readonly Regex _tokPerSecRx = new(@"([\d.]+)\s+tokens per second", RegexOptions.Compiled);
+        private static readonly Regex _rxListenUrl = new(@"server is listening on\s+(https?://\S+)", RegexOptions.Compiled);
 
         private void AppendLog(string text, bool isError)
         {
             // Suppress noisy internal server status lines
             if (text.Contains("GET /slots") || text.Contains("all slots are idle")) return;
+
+            // Capture the chat UI URL straight from the server's "listening on …" line
+            if (_chatUiUrl == null)
+            {
+                var urlMatch = _rxListenUrl.Match(text);
+                if (urlMatch.Success)
+                    _chatUiUrl = urlMatch.Groups[1].Value.Replace("0.0.0.0", "localhost");
+            }
 
             // Detect when the server finishes loading and is ready to serve
             if (!_serverReady && (text.Contains("server is listening") || text.Contains("all slots are ready")))
@@ -880,6 +975,7 @@ namespace LlamaServerLauncher
                 {
                     lblStatus.Text      = "Running…";
                     lblStatus.ForeColor = System.Drawing.SystemColors.ControlText;
+                    UpdateCommandPreview();
                 }));
             }
 
@@ -1221,7 +1317,7 @@ namespace LlamaServerLauncher
             var (ctx, layers) = await Task.Run(() => ReadGgufMeta(path));
             _modelLayerCount  = layers > 0 ? (int)layers : 0;
             _modelDefaultCtx  = ctx    > 0 ? (int)ctx    : 0;
-            lblCtxSize.Text    = ctx    > 0 ? $"({ctx:N0})"       : "";
+            lblCtxSize.Text    = ctx    > 0 ? $"({ctx})"       : "";
             lblLayerCount.Text = layers > 0 ? $"({layers + 1} layers)" : "";
             UpdateCtxPerSlot();
             if (_modelLayerCount > 0)
@@ -1239,7 +1335,7 @@ namespace LlamaServerLauncher
         {
             int slots = (int)nudParallel.Value;
             int ctx = chkCtxDefault.Checked ? _modelDefaultCtx : (int)nudCtxSize.Value;
-            lblCtxPerSlot.Text = ctx > 0 ? $"({ctx / slots:N0} tok/slot)" : "";
+            lblCtxPerSlot.Text = ctx > 0 ? $"({ctx / slots} tok/slot)" : "";
         }
 
         private static (long Ctx, long Layers) ReadGgufMeta(string path)
@@ -1576,14 +1672,13 @@ namespace LlamaServerLauncher
                         : "no data";
                     string countPart  = Runs.Count == 1 ? "1 run" : $"{Runs.Count} runs";
                     bool isCurrentConfig = isActive && ArgsLabel == StripModelArg(_sessionArgs ?? "");
-                    string configText = $"{star}{tpsPart}  ({countPart})   {ArgsLabel}"
-                                      + (isCurrentConfig ? "  <- current settings" : "");
+                    string configText = $"{star}{tpsPart}  ({countPart})";
 
                     var configNode = new TreeNode(configText)
                     {
                         ForeColor = isBest ? green : System.Drawing.Color.LightGray,
                         NodeFont  = isBest ? boldFont : null,
-                        Tag       = new PerfConfigItem { Model = modelGroup.Key, Params = Params, ArgsLabel = ArgsLabel, GenAvg = GenAvg }
+                        Tag       = new PerfConfigItem { Model = modelGroup.Key, Params = Params, ArgsLabel = Params.ToLabel(), GenAvg = GenAvg, IsCurrent = isCurrentConfig }
                     };
                     modelNode.Nodes.Add(configNode);
 
@@ -1594,7 +1689,7 @@ namespace LlamaServerLauncher
                         var runNode = new TreeNode($"{ts:yyyy-MM-dd HH:mm}   gen {FmtTps(r.GenTps)} t/s{pre}")
                         {
                             ForeColor = System.Drawing.Color.DimGray,
-                            Tag       = new PerfConfigItem { Model = modelGroup.Key, Params = Params, ArgsLabel = ArgsLabel, GenAvg = GenAvg }
+                            Tag       = new PerfConfigItem { Model = modelGroup.Key, Params = Params, ArgsLabel = ArgsLabel, GenAvg = GenAvg, IsCurrent = false }
                         };
                         configNode.Nodes.Add(runNode);
                     }
@@ -1639,6 +1734,7 @@ namespace LlamaServerLauncher
             public PerfParams Params { get; init; }
             public string ArgsLabel  { get; init; }
             public double GenAvg     { get; init; }
+            public bool IsCurrent    { get; init; }
             public override string ToString() =>
                 $"{Model}  |  {ArgsLabel}" + (GenAvg >= 0 ? $"  ({GenAvg:F1} t/s)" : "");
         }

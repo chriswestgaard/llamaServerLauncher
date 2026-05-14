@@ -57,11 +57,13 @@ namespace LlamaServerLauncher
         private Button btnBrowseExe;
         private CheckBox chkEmbedding, chkRerank, chkMetrics;
 
-        // Bottom chrome
+        // Model tab buttons (top right)
+        private Button btnResetDefaults, btnOpenChat;
+
+       // Bottom chrome
         private TableLayoutPanel tlpMain;
         private TextBox txtCmdPreview;
         private Button btnLaunch;
-        private Button btnOpenChat;
         private Label lblStatus;
 
         // Tooltips
@@ -90,10 +92,10 @@ namespace LlamaServerLauncher
             this.tabAdvanced    = new TabPage { Text = "Advanced" };
 
 
-            this.btnBrowse        = new Button    { Text = "...", Dock = DockStyle.Fill };
+            this.btnBrowse        = new Button    { Text = "…", Dock = DockStyle.Fill, MinimumSize = new Size(0, 28), Margin = new Padding(4, 0, 0, 0) };
             this.chkMmproj        = new CheckBox { Text = "", AutoSize = true, Margin = new Padding(3, 0, 4, 0), Anchor = AnchorStyles.None };
             this.txtMmprojPath    = new TextBox  { Dock = DockStyle.Fill, ReadOnly = true, Enabled = false };
-            this.btnBrowseMmproj  = new Button   { Text = "...", Dock = DockStyle.Fill, Enabled = false };
+            this.btnBrowseMmproj  = new Button   { Text = "…", Dock = DockStyle.Fill, Enabled = false, MinimumSize = new Size(0, 28), Margin = new Padding(4, 0, 0, 0) };
             this.cbModel         = new ComboBox  { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
             this.chkNglAuto    = new CheckBox { Text = "Auto", AutoSize = true, Checked = true, Margin = new Padding(0, 5, 6, 0) };
             this.trkGpuLayers  = new TrackBar { Minimum = 0, Maximum = 200, Value = 200, TickStyle = TickStyle.None, AutoSize = false, Height = 28, Dock = DockStyle.Fill, Enabled = false };
@@ -152,15 +154,29 @@ namespace LlamaServerLauncher
             this.txtApiKey    = new TextBox { Dock = DockStyle.Fill };
             this.txtExePath   = new TextBox { Dock = DockStyle.Fill };
             this.txtExtraArgs = new TextBox { Dock = DockStyle.Fill, Multiline = true, Height = 56, ScrollBars = ScrollBars.Vertical };
-            this.btnBrowseExe = new Button  { Text = "...", Dock = DockStyle.Fill };
+            this.btnBrowseExe = new Button  { Text = "…", Dock = DockStyle.Fill, MinimumSize = new Size(0, 28), Margin = new Padding(4, 0, 0, 0) };
             this.chkEmbedding = new CheckBox { Text = "Embedding Mode",    AutoSize = true };
             this.chkRerank    = new CheckBox { Text = "Reranking Mode",   AutoSize = true };
             this.chkMetrics   = new CheckBox { Text = "Prometheus Metrics", AutoSize = true };
+            this.btnResetDefaults = new Button
+            {
+                Text = "",
+                Size = new Size(44, 44),
+                Margin = new Padding(0, 0, 0, 4),
+                Font = new Font("Segoe MDL2 Assets", this.Font.Size + 4F, FontStyle.Regular),
+                FlatStyle = FlatStyle.Standard,
+                BackColor = Color.FromArgb(91, 124, 153),
+                ForeColor = Color.White,
+                UseVisualStyleBackColor = false,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Padding = new Padding(0)
+            };
+            _tip.SetToolTip(this.btnResetDefaults, "Reset all parameters to default values");
+            this.btnOpenChat      = new Button { Text = "Open Chat UI", Dock = DockStyle.Fill, Margin = new Padding(0, 4, 0, 4), Font = new Font(this.Font, FontStyle.Bold), Enabled = false };
 
             this.tlpMain       = new TableLayoutPanel();
             this.txtCmdPreview = new TextBox { ReadOnly = true, Multiline = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, Font = new Font("Consolas", 7.5F), BackColor = System.Drawing.SystemColors.ControlLight };
-            this.btnLaunch     = new Button  { Text = "Launch llama-server", Dock = DockStyle.Fill };
-            this.btnOpenChat   = new Button  { Text = "Open Chat UI", Dock = DockStyle.Fill, Enabled = false };
+            this.btnLaunch     = new Button  { Text = "Launch llama-server", Dock = DockStyle.Fill, Margin = new Padding(8, 4, 0, 4), Font = new Font(this.Font, FontStyle.Bold) };
             this.lblStatus     = new Label   { AutoSize = false, Dock = DockStyle.Fill, Text = "", TextAlign = System.Drawing.ContentAlignment.MiddleLeft, Padding = new Padding(4, 0, 0, 0) };
 
             // ── ComboBox items ──────────────────────────────────────────────
@@ -172,15 +188,37 @@ namespace LlamaServerLauncher
 
             // ── MODEL TAB ──────────────────────────────────────────────────
             var tlpModelRow = MakeRow2(this.cbModel, this.btnBrowse, 34);
-            var tlpModel = MakeTlp(8);
+            var tlpModel = MakeTlp(10);
 
             tlpModel.RowStyles[4] = new RowStyle(SizeType.Absolute, 160F);  // HW side-by-side panel
             tlpModel.RowStyles[5] = new RowStyle(SizeType.Absolute, 110F);  // Context graph
             tlpModel.RowStyles[6] = new RowStyle(SizeType.Absolute, 36F);   // Perf Observations label
             tlpModel.RowStyles[7] = new RowStyle(SizeType.Absolute, 110F);  // Perf Observations box
 
-            AddRow(tlpModel, 0, MakeLbl("Model File"), tlpModelRow, "The .gguf model file to load and serve.");
+            // ── Top header: 2 columns [Model File | Image Input] on left, [Reset | Open Chat] on right ──
+            var tlpTopHeader = new TableLayoutPanel
+            {
+                Dock = DockStyle.Top, ColumnCount = 2, RowCount = 2,
+                Margin = new Padding(0), AutoSize = true, Padding = new Padding(4, 4, 4, 4)
+            };
+            tlpTopHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70F));   // Left: model file + image input
+            tlpTopHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30F));   // Right: buttons
+            tlpTopHeader.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            tlpTopHeader.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
+            // Left column: Model File and Image Input
+            var tlpLeft = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 2,
+                Margin = new Padding(0, 0, 4, 0), AutoSize = true, Padding = new Padding(0, 0, 4, 0)
+            };
+            tlpLeft.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 230F));
+            tlpLeft.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 22F));
+            tlpLeft.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+            tlpLeft.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            tlpLeft.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+
+            AddRow(tlpLeft, 0, MakeLbl("Model File"), tlpModelRow, "The .gguf model file to load and serve.");
             var tlpMmprojRow = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1,
@@ -198,7 +236,37 @@ namespace LlamaServerLauncher
                 this.txtMmprojPath.Enabled   = this.chkMmproj.Checked;
                 this.btnBrowseMmproj.Enabled = this.chkMmproj.Checked;
             };
-            AddRow(tlpModel, 1, MakeLbl("Image Input  (--mmproj)"), tlpMmprojRow, "Load a multimodal projector (.gguf) to enable image/vision input.\nRequired for vision-capable models such as LLaVA or Qwen-VL.\n(--mmproj)");
+            AddRow(tlpLeft, 1, MakeLbl("Image Input  (--mmproj)"), tlpMmprojRow, "Load a multimodal projector (.gguf) to enable image/vision input.\nRequired for vision-capable models such as LLaVA or Qwen-VL.\n(--mmproj)");
+
+            // Right column: Default values button
+            var tlpRight = new TableLayoutPanel
+            {
+                Dock = DockStyle.None, ColumnCount = 1, RowCount = 2,
+                Anchor = AnchorStyles.Top | AnchorStyles.Right,
+                Margin = new Padding(4, 0, 4, 0), AutoSize = true, Padding = new Padding(4, 4, 4, 4)
+            };
+            tlpRight.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+            tlpRight.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            tlpRight.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            tlpRight.Controls.Add(this.btnResetDefaults, 0, 0);
+
+            var lblResetDefaults = new Label
+            {
+                Text = "Reset defaults",
+                AutoSize = true,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Anchor = AnchorStyles.Top,
+                Margin = new Padding(0, 2, 0, 0),
+                ForeColor = Color.FromArgb(90, 90, 90)
+            };
+            _tip.SetToolTip(lblResetDefaults, "Reset all parameters to default values");
+            tlpRight.Controls.Add(lblResetDefaults, 0, 1);
+
+            // Center the button horizontally over the label
+            this.btnResetDefaults.Anchor = AnchorStyles.Top;
+            tlpTopHeader.Controls.Add(tlpLeft, 0, 0);
+            tlpTopHeader.Controls.Add(tlpRight, 1, 0);
+            Span3(tlpModel, tlpTopHeader, 0, 0);
 
             // ── GroupBox: GPU & Threading (left half, row 2) ─────────────
             var tlpGpuThreading = MakeTlp(5, 165);
@@ -488,36 +556,47 @@ namespace LlamaServerLauncher
                 bool selected = (e.State & TreeNodeStates.Selected) != 0;
                 var  font     = e.Node.NodeFont ?? this.treePerf.Font;
 
-                // ── Config nodes (level 1): main text | current-settings marker | load hint ──
+                // ── Config nodes (level 1): main text | parameters | marker ──
                 if (e.Node.Level == 1)
                 {
                     using var bgBrush = new SolidBrush(selected ? Color.FromArgb(40, 70, 40) : this.treePerf.BackColor);
                     e.Graphics.FillRectangle(bgBrush, e.Bounds);
 
-                    const string currentMarker = "  <- current settings";
-                    string nodeText   = e.Node.Text;
-                    bool hasCurrent   = nodeText.EndsWith(currentMarker);
-                    string mainText   = hasCurrent ? nodeText[..^currentMarker.Length] : nodeText;
-                    var    mainColor  = selected ? Color.White : e.Node.ForeColor;
+                    var item = e.Node.Tag as PerfConfigItem;
+                    bool hasCurrent = item?.IsCurrent ?? false;
+                    string mainText = e.Node.Text; // star + tps + count
+                    var    mainColor = selected ? Color.White : e.Node.ForeColor;
 
                     int cx = e.Bounds.Left;
 
+                    // 1. Draw main text (star, tps, count)
                     int mainW = TextRenderer.MeasureText(e.Graphics, mainText, font, Size.Empty, TextFormatFlags.NoPadding).Width;
                     TextRenderer.DrawText(e.Graphics, mainText, font,
                         new Rectangle(cx, e.Bounds.Top, mainW, e.Bounds.Height),
                         mainColor, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
                     cx += mainW;
 
+                    // 2. Draw parameters (ArgsLabel)
+                    if (item != null && !string.IsNullOrEmpty(item.ArgsLabel))
+                    {
+                        string argsText = $"  {item.ArgsLabel}";
+                        int argsW = TextRenderer.MeasureText(e.Graphics, argsText, font, Size.Empty, TextFormatFlags.NoPadding).Width;
+                        TextRenderer.DrawText(e.Graphics, argsText, font,
+                            new Rectangle(cx, e.Bounds.Top, argsW, e.Bounds.Height),
+                            Color.FromArgb(150, 150, 150), TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                        cx += argsW;
+                    }
+
+                    // 3. Draw marker
                     if (hasCurrent)
                     {
+                        const string currentMarker = "  <- current settings";
                         int markerW = TextRenderer.MeasureText(e.Graphics, currentMarker, font, Size.Empty, TextFormatFlags.NoPadding).Width;
                         TextRenderer.DrawText(e.Graphics, currentMarker, font,
                             new Rectangle(cx, e.Bounds.Top, markerW, e.Bounds.Height),
                             Color.White, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
-                        cx += markerW;
                     }
-
-                    if (!hasCurrent)
+                    else
                     {
                         const string loadHint = "  [load settings]";
                         int hintW = TextRenderer.MeasureText(e.Graphics, loadHint, font, Size.Empty, TextFormatFlags.NoPadding).Width;
@@ -573,7 +652,8 @@ namespace LlamaServerLauncher
             this.treePerf.NodeMouseClick += (_, e) =>
             {
                 if (e.Node?.Level != 1) return;
-                if (e.Node.Text.EndsWith("  <- current settings")) return;
+                var item = e.Node.Tag as PerfConfigItem;
+                if (item == null || item.IsCurrent) return;
                 using var g = this.treePerf.CreateGraphics();
                 var font  = e.Node.NodeFont ?? this.treePerf.Font;
                 int mainW = TextRenderer.MeasureText(g, e.Node.Text, font, Size.Empty, TextFormatFlags.NoPadding).Width;
@@ -587,12 +667,16 @@ namespace LlamaServerLauncher
             {
                 var node = this.treePerf.GetNodeAt(e.X, e.Y);
                 bool hand = false;
-                if (node?.Level == 1 && !node.Text.EndsWith("  <- current settings"))
+                if (node?.Level == 1)
                 {
-                    using var g = this.treePerf.CreateGraphics();
-                    var font  = node.NodeFont ?? this.treePerf.Font;
-                    int mainW = TextRenderer.MeasureText(g, node.Text, font, Size.Empty, TextFormatFlags.NoPadding).Width;
-                    hand = e.X >= node.Bounds.Left + mainW;
+                    var item = node.Tag as PerfConfigItem;
+                    if (item != null && !item.IsCurrent)
+                    {
+                        using var g = this.treePerf.CreateGraphics();
+                        var font  = node.NodeFont ?? this.treePerf.Font;
+                        int mainW = TextRenderer.MeasureText(g, node.Text, font, Size.Empty, TextFormatFlags.NoPadding).Width;
+                        hand = e.X >= node.Bounds.Left + mainW;
+                    }
                 }
                 this.treePerf.Cursor = hand ? Cursors.Hand : Cursors.Default;
             };
@@ -623,28 +707,29 @@ namespace LlamaServerLauncher
             this.tlpMain.RowCount = 3;
             this.tlpMain.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));   // tabs
             this.tlpMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 52F));   // cmd preview
-            this.tlpMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));   // buttons + status
+            this.tlpMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));   // status + launch
 
-            // Status label on left, buttons on right — all in one row
-            var tlpButtons = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Margin = new Padding(0) };
-            tlpButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            tlpButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220F));
-            tlpButtons.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 140F));
-            tlpButtons.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-            tlpButtons.Controls.Add(this.lblStatus,   0, 0);
-            tlpButtons.Controls.Add(this.btnLaunch,   1, 0);
-            tlpButtons.Controls.Add(this.btnOpenChat, 2, 0);
+            // Status label on left, Open Chat + Launch buttons on right — all in one row
+            var tlpStatusBar = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Margin = new Padding(0) };
+            tlpStatusBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));    // status fills
+            tlpStatusBar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180F));   // open chat ui
+            tlpStatusBar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 240F));   // launch fixed width
+            tlpStatusBar.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+            tlpStatusBar.Controls.Add(this.lblStatus,   0, 0);
+            tlpStatusBar.Controls.Add(this.btnOpenChat, 1, 0);
+            tlpStatusBar.Controls.Add(this.btnLaunch,   2, 0);
 
             this.tlpMain.Controls.Add(this.tabMain,       0, 0);
             this.tlpMain.Controls.Add(this.txtCmdPreview, 0, 1);
-            this.tlpMain.Controls.Add(tlpButtons,         0, 2);
+            this.tlpMain.Controls.Add(tlpStatusBar,       0, 2);
 
             // ── Event handlers ────────────────────────────────────────────
             this.btnLaunch.Click       += btnLaunch_Click;
-            this.btnOpenChat.Click     += btnOpenChat_Click;
             this.btnBrowse.Click       += btnBrowse_Click;
             this.btnBrowseExe.Click    += btnBrowseExe_Click;
             this.btnBrowseMmproj.Click += btnBrowseMmproj_Click;
+            this.btnResetDefaults.Click += btnResetDefaults_Click;
+            this.btnOpenChat.Click      += btnOpenChat_Click;
 
 
             void refreshPreview(object s, System.EventArgs e) => UpdateCommandPreview();
