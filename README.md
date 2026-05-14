@@ -1,8 +1,9 @@
+
 # Llama Server Launcher
 
 A Windows desktop GUI for launching and managing [llama-server](https://github.com/ggml-org/llama.cpp) (llama.cpp).
 
-<img width="1919" height="1015" alt="Screenshot 2026-05-11 215555" src="https://github.com/user-attachments/assets/70fe4216-4e30-4dba-baf7-72571d4a981f" />
+<img width="746" height="620" alt="Screenshot 2026-05-14 132106" src="https://github.com/user-attachments/assets/3b06dfac-2240-4bdc-8de8-a2ee71b24fae" />
 
 ## Features
 
