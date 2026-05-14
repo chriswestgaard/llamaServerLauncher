@@ -276,9 +276,9 @@ namespace LlamaServerLauncher
                 ColumnCount = 3, RowCount = 1, Margin = new Padding(0),
                 MinimumSize = new Size(0, 60)
             };
-            tlpParamCols.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33F));
-            tlpParamCols.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.33F));
-            tlpParamCols.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 33.34F));
+            tlpParamCols.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 31.00F));
+            tlpParamCols.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 38.00F));
+            tlpParamCols.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 31.00F));
             tlpParamCols.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             tlpParamCols.Controls.Add(grpGpuThreading, 0, 0);
             tlpParamCols.Controls.Add(grpCtxCache,     1, 0);

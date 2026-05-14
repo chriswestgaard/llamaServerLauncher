@@ -42,6 +42,10 @@ namespace LlamaServerLauncher
             private int _ctxMax, _ctxCurrent;
         private volatile bool _pollingSlotsInProgress;
         private volatile bool _serverReady;
+        private volatile bool _fitAbortedNgl999;
+        private volatile bool _fitSuccessNotified;
+        private int _fitReducedCtxSize;
+        private int _fitAdjustedNgl = -1;
         private static readonly System.Net.Http.HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(3) };
 
         // Server log file (written in real-time; rtbLog is populated on-demand when tab is shown)
@@ -139,21 +143,35 @@ namespace LlamaServerLauncher
             {
                 lblStatus.Text      = "Running  ⚠  restart to apply changes";
                 lblStatus.ForeColor = System.Drawing.Color.FromArgb(255, 0, 0);
+                btnLaunch.Text      = "Restart Server";
+                btnLaunch.BackColor = System.Drawing.Color.FromArgb(204, 80, 0);
+                btnLaunch.ForeColor = System.Drawing.Color.White;
             }
             else if (isRunning)
             {
                 lblStatus.Text      = "Running…";
                 lblStatus.ForeColor = System.Drawing.SystemColors.ControlText;
+                btnLaunch.Text      = "Stop Server";
+                btnLaunch.BackColor = System.Drawing.SystemColors.Control;
+                btnLaunch.ForeColor = System.Drawing.SystemColors.ControlText;
             }
         }
 
-        private void btnLaunch_Click(object sender, EventArgs e)
+        private async void btnLaunch_Click(object sender, EventArgs e)
         {
             bool isRunning = false;
             try { isRunning = _proc != null && !_proc.HasExited; } catch { }
             if (isRunning)
             {
-                StopServer();
+                bool needsRestart = cbModel.SelectedItem != null &&
+                                    !string.IsNullOrEmpty(_sessionArgs) &&
+                                    BuildCommand(cbModel.SelectedItem.ToString() + ".gguf") != _sessionArgs;
+                await StopServer();
+                if (needsRestart)
+                {
+                    string restartModelFile = cbModel.SelectedItem.ToString() + ".gguf";
+                    RunCommand(BuildCommand(restartModelFile));
+                }
                 return;
             }
 
@@ -295,18 +313,22 @@ namespace LlamaServerLauncher
 
             try
             {
-                _proc = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
-                _proc.OutputDataReceived += (_, e) => { if (e.Data != null) AppendLog(e.Data, isError: false); };
-                _proc.ErrorDataReceived += (_, e) => { if (e.Data != null) AppendLog(e.Data, isError: true); };
-                _proc.Exited += (_, _) =>
+                var thisProc = new Process { StartInfo = startInfo, EnableRaisingEvents = true };
+                _proc = thisProc;
+                thisProc.OutputDataReceived += (_, e) => { if (e.Data != null) AppendLog(e.Data, isError: false); };
+                thisProc.ErrorDataReceived += (_, e) => { if (e.Data != null) AppendLog(e.Data, isError: true); };
+                thisProc.Exited += (_, _) =>
                 {
-                    int code = _proc.ExitCode;
+                    int code = thisProc.ExitCode;
                     this.BeginInvoke(new Action(() =>
                     {
+                        if (_proc != thisProc) return; // a restart started a new process — skip cleanup
                         AppendLog($"--- process exited (code {code}) ---", isError: false);
                         lblStatus.Text      = $"Stopped (exit code {code})";
                         lblStatus.ForeColor = System.Drawing.SystemColors.ControlText;
-                        btnLaunch.Text = "Launch llama-server";
+                        btnLaunch.Text      = "Launch llama-server";
+                        btnLaunch.BackColor = System.Drawing.SystemColors.Control;
+                        btnLaunch.ForeColor = System.Drawing.SystemColors.ControlText;
                         btnOpenChat.Enabled = false;
                         SavePerformanceSession(code);
                         UpdatePerformanceTips();
@@ -333,11 +355,17 @@ namespace LlamaServerLauncher
                 _ctxMax = 0;
                 _ctxCurrent = 0;
                 _serverReady = false;
+                _fitAbortedNgl999   = false;
+                _fitSuccessNotified = false;
+                _fitReducedCtxSize  = 0;
+                _fitAdjustedNgl     = -1;
 
                 AppendLog($"--- started: {txtExePath.Text} ---", isError: false);
                 UpdatePerformanceTips();
-                lblStatus.Text = "Starting…";
-                btnLaunch.Text = "Stop Server";
+                lblStatus.Text      = "Starting…";
+                btnLaunch.Text      = "Stop Server";
+                btnLaunch.BackColor = System.Drawing.SystemColors.Control;
+                btnLaunch.ForeColor = System.Drawing.SystemColors.ControlText;
                 btnOpenChat.Enabled = true;
             }
             catch (Exception ex)
@@ -366,14 +394,16 @@ namespace LlamaServerLauncher
             }
         }
 
-        private async void StopServer()
+        private async Task StopServer()
         {
             var proc = _proc;
             if (proc == null) return;
 
-            btnLaunch.Enabled = false;
+            btnLaunch.Enabled   = false;
             btnOpenChat.Enabled = false;
-            btnLaunch.Text = "Stopping…";
+            btnLaunch.Text      = "Stopping…";
+            btnLaunch.BackColor = System.Drawing.SystemColors.Control;
+            btnLaunch.ForeColor = System.Drawing.SystemColors.ControlText;
             AppendLog("--- sending stop signal ---", isError: false);
 
             try
@@ -667,7 +697,9 @@ namespace LlamaServerLauncher
                 vramPct, vramLbl, storeVramGb);
         }
 
-        private static readonly Regex _rxCtxMax   = new(@"\bn_ctx\b\s*=\s*(\d+)",     RegexOptions.Compiled);
+        private static readonly Regex _rxCtxMax        = new(@"\bn_ctx\b\s*=\s*(\d+)",                          RegexOptions.Compiled);
+        private static readonly Regex _rxFitCtxReduced = new(@"context size reduced from \d+ to (\d+)",          RegexOptions.Compiled);
+        private static readonly Regex _rxFitNgl        = new(@"set ngl_per_device\[0\]\.n_layer=(\d+)",          RegexOptions.Compiled);
         // Matches "n_tokens = N" but not "task.n_tokens" or "batch.n_tokens"
         private static readonly Regex _rxNTokens  = new(@"(?<![.\w])n_tokens\s*=\s*(\d+)", RegexOptions.Compiled);
 
@@ -868,6 +900,91 @@ namespace LlamaServerLauncher
                         }
                     }
                 }
+            }
+
+            // Capture the reduced context size from the -fit log line, e.g.:
+            // "context size reduced from 262144 to 4096 -> need 885 MiB less memory in total"
+            if (text.Contains("context size reduced from"))
+            {
+                var m = _rxFitCtxReduced.Match(text);
+                if (m.Success && int.TryParse(m.Groups[1].Value, out int reduced) && reduced > 0)
+                    _fitReducedCtxSize = reduced;
+            }
+
+            // Capture the committed GPU layer count chosen by -fit, e.g.:
+            // "common_params_fit_impl: set ngl_per_device[0].n_layer=62"
+            // Ignore the "ngl_per_device_high" lines — those are the binary-search upper bound.
+            if (text.Contains("set ngl_per_device[0].n_layer="))
+            {
+                var m = _rxFitNgl.Match(text);
+                if (m.Success && int.TryParse(m.Groups[1].Value, out int ngl) && ngl > 0)
+                    _fitAdjustedNgl = ngl;
+            }
+
+            // Notify when -fit successfully altered params (context and/or GPU layers changed)
+            if (!_fitSuccessNotified && text.Contains("successfully fit params to free device memory"))
+            {
+                _fitSuccessNotified = true;
+                int newCtx = _fitReducedCtxSize;
+                int newNgl = _fitAdjustedNgl;
+                BeginInvoke(new Action(() =>
+                {
+                    var parts = new List<string>();
+                    if (newCtx > 0) parts.Add($"• Context window reduced to {newCtx:N0} tokens");
+                    if (newNgl > 0) parts.Add($"• GPU layers capped at {newNgl}");
+
+                    if (parts.Count == 0) return; // nothing significant changed — no need to interrupt
+
+                    string detail = string.Join("\n", parts);
+                    MessageBox.Show(
+                        "The auto-fit algorithm adjusted parameters to fit within available VRAM:\n\n" +
+                        detail + "\n\n" +
+                        "These values have been updated in the UI and saved so they take effect on next launch.",
+                        "Parameters auto-adjusted by -fit",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Information);
+
+                    if (newCtx > 0)
+                    {
+                        chkCtxDefault.Checked = false;
+                        nudCtxSize.Value = Math.Max(nudCtxSize.Minimum, Math.Min(nudCtxSize.Maximum, newCtx));
+                    }
+                    if (newNgl > 0)
+                    {
+                        cbNglMode.SelectedIndex = 3; // Custom
+                        nudGpuLayers.Value = Math.Max(nudGpuLayers.Minimum, Math.Min(nudGpuLayers.Maximum, newNgl));
+                    }
+                    // Sync _sessionArgs so refreshPreview doesn't flag a restart —
+                    // the server is already running with these adjusted values.
+                    if (cbModel.SelectedItem != null)
+                        _sessionArgs = BuildCommand(cbModel.SelectedItem.ToString() + ".gguf");
+                    SaveConfig();
+                    UpdateCommandPreview();
+                }));
+            }
+
+            // Detect -fit abort when GPU layers are locked to 999 (GPU only mode)
+            if (!_fitAbortedNgl999 && text.Contains("failed to fit params to free device memory") && text.Contains("n_gpu_layers already set by user to 999"))
+            {
+                _fitAbortedNgl999 = true;
+                int newCtx = _fitReducedCtxSize;
+                BeginInvoke(new Action(() =>
+                {
+                    string ctxDetail = newCtx > 0 ? $" Context was reduced to {newCtx:N0} tokens." : "";
+                    MessageBox.Show(
+                        "The server could not reserve VRAM headroom because GPU Layers is set to \"GPU only\" (-ngl 999).\n\n" +
+                        $"The auto-fit algorithm reduced your context size instead.{ctxDetail}\n\n" +
+                        "Switch GPU Layers to \"Custom\" so the fit algorithm can also adjust layer count, or reduce context size manually.",
+                        "Context auto-reduced — GPU layers locked",
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+
+                    if (newCtx > 0)
+                    {
+                        chkCtxDefault.Checked = false;
+                        nudCtxSize.Value = Math.Max(nudCtxSize.Minimum, Math.Min(nudCtxSize.Maximum, newCtx));
+                    }
+                }));
             }
 
             // Write to log file; rtbLog is refreshed on-demand when the Log tab is opened
@@ -1204,7 +1321,9 @@ namespace LlamaServerLauncher
             else if (recentTps >= 20)
                 Line($"▶ Generation: {recentTps:F1} t/s — good.", green);
             else if (recentTps >= 8)
-                Line($"▶ Generation: {recentTps:F1} t/s — moderate. Consider increasing GPU layers (-ngl) if VRAM has headroom.", amber);
+                Line(GpuLayersValue == 999
+                    ? $"▶ Generation: {recentTps:F1} t/s — moderate. All layers are already on GPU; try reducing context size (-c) or enabling Flash Attention to improve speed."
+                    : $"▶ Generation: {recentTps:F1} t/s — moderate. Consider increasing GPU layers (-ngl) if VRAM has headroom.", amber);
             else if (recentTps >= 0)
                 Line($"▶ Generation: {recentTps:F1} t/s — slow. Most work is likely on CPU; increase -ngl to offload more layers to GPU.", red);
             else
