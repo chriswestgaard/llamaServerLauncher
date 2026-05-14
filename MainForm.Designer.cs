@@ -175,7 +175,7 @@ namespace LlamaServerLauncher
             this.btnOpenChat      = new Button { Text = "Open Chat UI", Dock = DockStyle.Fill, Margin = new Padding(0, 4, 0, 4), Font = new Font(this.Font, FontStyle.Bold), Enabled = false };
 
             this.tlpMain       = new TableLayoutPanel();
-            this.txtCmdPreview = new TextBox { ReadOnly = true, Multiline = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, Font = new Font("Consolas", 7.5F), BackColor = System.Drawing.SystemColors.ControlLight };
+            this.txtCmdPreview = new TextBox { ReadOnly = true, Multiline = true, WordWrap = true, ScrollBars = ScrollBars.Vertical, Dock = DockStyle.Fill, Font = new Font("Consolas", 7.5F), BackColor = System.Drawing.SystemColors.ControlLight };
             this.btnLaunch     = new Button  { Text = "Launch llama-server", Dock = DockStyle.Fill, Margin = new Padding(8, 4, 0, 4), Font = new Font(this.Font, FontStyle.Bold) };
             this.lblStatus     = new Label   { AutoSize = false, Dock = DockStyle.Fill, Text = "", TextAlign = System.Drawing.ContentAlignment.MiddleLeft, Padding = new Padding(4, 0, 0, 0) };
 
@@ -704,9 +704,10 @@ namespace LlamaServerLauncher
             this.tlpMain.Padding = new Padding(8);
             this.tlpMain.ColumnCount = 1;
             this.tlpMain.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
-            this.tlpMain.RowCount = 3;
+            this.tlpMain.RowCount = 4;
             this.tlpMain.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));   // tabs
-            this.tlpMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 52F));   // cmd preview
+            this.tlpMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 20F));   // cmd preview label
+            this.tlpMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 72F));   // cmd preview
             this.tlpMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));   // status + launch
 
             // Status label on left, Open Chat + Launch buttons on right — all in one row
@@ -719,11 +720,14 @@ namespace LlamaServerLauncher
             tlpStatusBar.Controls.Add(this.btnOpenChat, 1, 0);
             tlpStatusBar.Controls.Add(this.btnLaunch,   2, 0);
 
+            var lblCmdHint = new Label { Text = "Command preview — click to copy", Dock = DockStyle.Fill, Font = new Font(this.Font.FontFamily, 7F), ForeColor = System.Drawing.SystemColors.GrayText, TextAlign = System.Drawing.ContentAlignment.MiddleLeft, Padding = new Padding(2, 0, 0, 0) };
             this.tlpMain.Controls.Add(this.tabMain,       0, 0);
-            this.tlpMain.Controls.Add(this.txtCmdPreview, 0, 1);
-            this.tlpMain.Controls.Add(tlpStatusBar,       0, 2);
+            this.tlpMain.Controls.Add(lblCmdHint,         0, 1);
+            this.tlpMain.Controls.Add(this.txtCmdPreview, 0, 2);
+            this.tlpMain.Controls.Add(tlpStatusBar,       0, 3);
 
             // ── Event handlers ────────────────────────────────────────────
+            this.txtCmdPreview.Click   += txtCmdPreview_Click;
             this.btnLaunch.Click       += btnLaunch_Click;
             this.btnBrowse.Click       += btnBrowse_Click;
             this.btnBrowseExe.Click    += btnBrowseExe_Click;

@@ -480,6 +480,18 @@ namespace LlamaServerLauncher
             }
         }
 
+        private void txtCmdPreview_Click(object sender, EventArgs e)
+        {
+            if (string.IsNullOrWhiteSpace(txtCmdPreview.Text)) return;
+            Clipboard.SetText(txtCmdPreview.Text);
+            string prev = lblStatus.Text;
+            lblStatus.Text = "Command copied to clipboard";
+            Task.Delay(2000).ContinueWith(_ => BeginInvoke((Action)(() =>
+            {
+                if (lblStatus.Text == "Command copied to clipboard") lblStatus.Text = prev;
+            })));
+        }
+
         private void btnResetDefaults_Click(object sender, EventArgs e)
         {
             ApplyDefaults();
@@ -684,7 +696,7 @@ namespace LlamaServerLauncher
                 int ctxMax = _ctxMax, ctxCur = _ctxCurrent;
                 graphCtx.AddSample(
                     ctxMax > 0 ? ctxCur * 100f / ctxMax : 0,
-                    ctxMax > 0 ? $"{ctxCur:N0} / {ctxMax:N0}" : "—");
+                    ctxMax > 0 ? $"{ctxCur} / {ctxMax}" : "—");
 
                 // ── Store last-known values and accumulate session samples ─
                 if (s.StoreCpu    >= 0) _lastCpu    = s.StoreCpu;
@@ -1068,7 +1080,7 @@ namespace LlamaServerLauncher
                 BeginInvoke(new Action(() =>
                 {
                     var parts = new List<string>();
-                    if (newCtx > 0) parts.Add($"• Context window reduced to {newCtx:N0} tokens");
+                    if (newCtx > 0) parts.Add($"• Context window reduced to {newCtx} tokens");
                     // Only report ngl if it was actually reduced below the model maximum
                     bool nglReduced = newNgl > 0 && newNgl < trkGpuLayers.Maximum;
                     if (nglReduced) parts.Add($"• GPU layers reduced to {newNgl} (of {trkGpuLayers.Maximum})");
@@ -1079,7 +1091,7 @@ namespace LlamaServerLauncher
                     MessageBox.Show(
                         "The auto-fit algorithm adjusted parameters to fit within available VRAM:\n\n" +
                         detail + "\n\n" +
-                        "These values have been updated in the UI and saved so they take effect on next launch.",
+                        "These values have been updated in the UI.",
                         "Parameters auto-adjusted by -fit",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Information);
@@ -1107,7 +1119,7 @@ namespace LlamaServerLauncher
                 int newCtx = _fitReducedCtxSize;
                 BeginInvoke(new Action(() =>
                 {
-                    string ctxDetail = newCtx > 0 ? $" Context was reduced to {newCtx:N0} tokens." : "";
+                    string ctxDetail = newCtx > 0 ? $" Context was reduced to {newCtx} tokens." : "";
                     MessageBox.Show(
                         "The server could not reserve VRAM headroom because GPU Layers is set to \"GPU only\" (-ngl 999).\n\n" +
                         $"The auto-fit algorithm reduced your context size instead.{ctxDetail}\n\n" +
@@ -1536,7 +1548,7 @@ namespace LlamaServerLauncher
             // 4. Flash attention for large contexts
             int ctxLive = chkCtxDefault.Checked ? 0 : (int)nudCtxSize.Value;
             if (ctxLive >= 8192 && !chkFlashAttn.Checked)
-                Line($"▶ Context is {ctxLive:N0} tokens — enable Flash Attention (-fa) to reduce VRAM usage and improve long-context speed.", amber);
+                Line($"▶ Context is {ctxLive} tokens — enable Flash Attention (-fa) to reduce VRAM usage and improve long-context speed.", amber);
         }
 
         private void SavePerformanceSession(int _)
@@ -1709,7 +1721,7 @@ namespace LlamaServerLauncher
             public string ToLabel()
             {
                 var parts = new List<string>();
-                if (CtxSize      > 0)                      parts.Add($"ctx={CtxSize:N0}");
+                if (CtxSize      > 0)                      parts.Add($"ctx={CtxSize}");
                 if (GpuLayers    >= 0)                     parts.Add($"ngl={GpuLayers}");
                 if (Threads      >= 0)                     parts.Add($"t={Threads}");
                 if (ThreadsBatch >= 0)                     parts.Add($"tb={ThreadsBatch}");
