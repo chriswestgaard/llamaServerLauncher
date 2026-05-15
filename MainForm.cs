@@ -60,6 +60,7 @@ namespace LlamaServerLauncher
         private int _nPastSlots; // n_past from /slots API; used for perf metrics to reflect full conversation context
         private volatile bool _pollingSlotsInProgress;
         private volatile bool _serverReady;
+        private volatile bool _userStopping;
         private string _chatUiUrl;
         private volatile bool _fitAbortedNgl999;
         private volatile bool _fitSuccessNotified;
@@ -71,6 +72,7 @@ namespace LlamaServerLauncher
         private readonly string _logFilePath = "server_log.txt";
         private StreamWriter _logWriter;
         private readonly object _logLock = new();
+        private readonly List<string> _sessionErrors = new();
         private readonly object _metricsLock = new();
         private long _logViewRenderedBytes = -1;
 
@@ -367,6 +369,8 @@ namespace LlamaServerLauncher
                     this.BeginInvoke(new Action(() =>
                     {
                         if (_proc != thisProc) return; // a restart started a new process — skip cleanup
+                        bool launchFailed = !_serverReady && !_userStopping;
+                        _userStopping = false;
                         AppendLog($"--- process exited (code {code}) ---", isError: false);
                         lblStatus.Text      = $"Stopped (exit code {code})";
                         lblStatus.ForeColor = _isDark ? Color.FromArgb(210, 210, 210) : SystemColors.ControlText;
@@ -378,6 +382,18 @@ namespace LlamaServerLauncher
                         UpdateCommandPreview();
                         SavePerformanceSession(code);
                         UpdatePerformanceTips();
+                        if (launchFailed)
+                        {
+                            string[] errors;
+                            lock (_logLock) errors = [.. _sessionErrors];
+                            var msg = $"The server failed to start (exit code {code}).";
+                            if (errors.Length > 0)
+                                msg += "\n\n" + string.Join("\n", errors);
+                            else
+                                msg += "\n\nCheck the Log tab for details.";
+                            MessageBox.Show(this, msg, "Server Launch Failed",
+                                MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        }
                     }));
                 };
 
@@ -402,6 +418,7 @@ namespace LlamaServerLauncher
                 _ctxCurrent = 0;
                 _serverReady = false;
                 _chatUiUrl = null;
+                lock (_logLock) _sessionErrors.Clear();
                 _fitAbortedNgl999   = false;
                 _fitSuccessNotified = false;
                 _fitReducedCtxSize  = 0;
@@ -447,6 +464,7 @@ namespace LlamaServerLauncher
             btnLaunch.ForeColor = System.Drawing.SystemColors.ControlText;
             AppendLog("--- sending stop signal ---", isError: false);
 
+            _userStopping = true;
             try
             {
                 // Kill the entire process tree so CUDA/Vulkan helper processes are
@@ -1165,6 +1183,13 @@ namespace LlamaServerLauncher
             // Suppress noisy internal server status lines
             if (text.Contains("GET /slots") || text.Contains("all slots are idle")) return;
 
+            // Collect red-classified lines for the launch-failure dialog
+            if (!_serverReady && ClassifyLogLine(text) == _logRed)
+            {
+                var clean = text.StartsWith("[E] ") ? text[4..] : text;
+                lock (_logLock) _sessionErrors.Add(clean);
+            }
+
             // Capture the chat UI URL straight from the server's "listening on …" line
             if (_chatUiUrl == null)
             {
@@ -1654,7 +1679,7 @@ namespace LlamaServerLauncher
             {
                 int take = Math.Min(5, _metricsGenTokPerSec.Count);
                 recentTps = (float)_metricsGenTokPerSec.Skip(_metricsGenTokPerSec.Count - take).Average();
-                recentCtx = _metricsGenCtxSize.Skip(_metricsGenCtxSize.Count - take).Average();
+                recentCtx = _nPastSlots > 0 ? _nPastSlots : _ctxCurrent;
             }
 
             float recentPpTps = -1;
@@ -1663,7 +1688,7 @@ namespace LlamaServerLauncher
             {
                 int take = Math.Min(5, _metricsPrefillTokPerSec.Count);
                 recentPpTps = (float)_metricsPrefillTokPerSec.Skip(_metricsPrefillTokPerSec.Count - take).Average();
-                recentCcx = _metricsPrefillCtxSize.Skip(_metricsPrefillCtxSize.Count - take).Average();
+                recentCcx = _nPastSlots > 0 ? _nPastSlots : _ctxCurrent;
             }
 
             if (!serverRunning)
