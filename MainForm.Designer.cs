@@ -99,7 +99,7 @@ namespace LlamaServerLauncher
             this.chkNglAuto    = new CheckBox { Text = "Auto", AutoSize = true, Checked = true, Margin = new Padding(0, 5, 6, 0) };
             this.nudGpuLayers  = new NumericUpDown { Minimum = 0, Maximum = 200, Value = 200, Dock = DockStyle.Fill, Enabled = false };
 this.lblLayerCount = new Label { AutoSize = true, ForeColor = System.Drawing.Color.DimGray, Margin = new Padding(0, 5, 0, 0), Text = "" };
-            this.chkCtxDefault   = new CheckBox { Text = "Model default", AutoSize = true, Checked = true, Margin = new Padding(0, 2, 12, 0) };
+            this.chkCtxDefault   = new CheckBox { Text = "Model default", AutoSize = true, Checked = true, Margin = new Padding(0, 2, 0, 0) };
             this.lblCtxSize      = new Label { AutoSize = true, ForeColor = System.Drawing.Color.DimGray, Margin = new Padding(0, 4, 0, 0), Text = "" };
             this.lblCtxPerSlot   = new Label { AutoSize = true, ForeColor = System.Drawing.Color.DimGray, Margin = new Padding(6, 4, 0, 0), Text = "" };
             this.nudCtxSize      = new NumericUpDown { Minimum = 512, Maximum = 10000000, Value = 4096, Increment = 1024, Dock = DockStyle.Fill, Visible = false, TextAlign = HorizontalAlignment.Right };
@@ -135,7 +135,7 @@ this.lblLayerCount = new Label { AutoSize = true, ForeColor = System.Drawing.Col
             this.cbSplitMode       = new ComboBox { Width = 110, DropDownStyle = ComboBoxStyle.DropDownList };
             this.cbSplitMode.Items.AddRange(new[] { "layer", "none", "row", "tensor" });
             this.cbSplitMode.SelectedIndex = 0;
-            this.chkKvOffload      = new CheckBox { Text = "KV Offload", AutoSize = true, Checked = true };
+            this.chkKvOffload      = new CheckBox { Text = "KV Offload", AutoSize = true, Checked = true, Margin = new Padding(0, 2, 0, 0) };
             this.nudDefragThold    = new NumericUpDown { Dock = DockStyle.Fill, Minimum = -1M, Maximum = 1M, Value = -1M, DecimalPlaces = 2, Increment = 0.05M };
             this.chkThreadsBatchAuto = new CheckBox { Text = "Auto", AutoSize = true, Checked = true, Margin = new Padding(0, 2, 8, 0) };
             this.nudThreadsBatch   = new NumericUpDown { Minimum = 1, Maximum = 256, Value = 4, Width = 60, Visible = false };
@@ -289,29 +289,29 @@ this.lblLayerCount = new Label { AutoSize = true, ForeColor = System.Drawing.Col
             // ── GroupBox: Context & Cache (right half, row 2) ────────────
             var tlpCtxCache = MakeTlp(7, 185);
 
-            var tlpCtx = new TableLayoutPanel
+             var tlpCtx = new TableLayoutPanel
             {
                 Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1,
                 Margin = new Padding(0), AutoSize = true, MinimumSize = new Size(0, 26)
             };
-            tlpCtx.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));      // checkbox
+            tlpCtx.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));      // spinner (fills)
             tlpCtx.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));      // model-default label
-            tlpCtx.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F)); // spinner (fills)
+            tlpCtx.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));      // checkbox
             tlpCtx.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            tlpCtx.Controls.Add(this.chkCtxDefault, 0, 0);
+            tlpCtx.Controls.Add(this.nudCtxSize,    0, 0);
             tlpCtx.Controls.Add(this.lblCtxSize,    1, 0);
-            tlpCtx.Controls.Add(this.nudCtxSize,    2, 0);
+            tlpCtx.Controls.Add(this.chkCtxDefault, 2, 0);
             this.chkCtxDefault.CheckedChanged += (_, _) =>
             {
                 this.lblCtxSize.Visible = this.chkCtxDefault.Checked;
                 this.nudCtxSize.Visible = !this.chkCtxDefault.Checked;
             };
-            AddRow(tlpCtxCache, 0, MakeLbl("Context Size  (-c)"),    tlpCtx,             "Maximum number of tokens in the context window.\n\"Model default\" uses the value embedded in the model file.\nLarger contexts require more VRAM/RAM. (-c)");
-            AddRow(tlpCtxCache, 1, MakeLbl("Batch Size  (-b)"),      this.nudBatchSize,  "Logical maximum batch size (default: 2048).\nLarger values improve prompt-processing throughput. (-b)");
-            AddRow(tlpCtxCache, 2, MakeLbl("UBatch Size  (-ub)"),    this.nudUBatchSize, "Physical maximum batch size (default: 512).\nSmaller values reduce peak VRAM usage. (-ub)");
-            AddRow(tlpCtxCache, 3, MakeLbl("Cache Type K  (-ctk)"),  this.cbCacheK,      "KV cache data type for Keys (default: f16).\nAllowed: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1.\nbf16 / q8_0 saves VRAM with minor quality loss. (-ctk)");
-            AddRow(tlpCtxCache, 4, MakeLbl("Cache Type V  (-ctv)"),  this.cbCacheV,      "KV cache data type for Values (default: f16).\nSame options as Cache Type K. (-ctv)");
-            AddChk(tlpCtxCache, 5, this.chkKvOffload,                "Offload KV cache to GPU VRAM (default: on).\nUncheck to keep KV cache in system RAM — useful when VRAM is tight.\n(-nkvo / --no-kv-offload)");
+             AddRow(tlpCtxCache, 0, MakeLbl("Context Size  (-c)"),    tlpCtx,             "Maximum number of tokens in the context window.\n\"Model default\" uses the value embedded in the model file.\nLarger contexts require more VRAM/RAM. (-c)");
+            AddRow(tlpCtxCache, 1, MakeLbl("KV Offload"),            this.chkKvOffload,  "Offload KV cache to GPU VRAM (default: on).\nUncheck to keep KV cache in system RAM — useful when VRAM is tight.\n(-nkvo / --no-kv-offload)");
+            AddRow(tlpCtxCache, 2, MakeLbl("Batch Size  (-b)"),      this.nudBatchSize,  "Logical maximum batch size (default: 2048).\nLarger values improve prompt-processing throughput. (-b)");
+            AddRow(tlpCtxCache, 3, MakeLbl("UBatch Size  (-ub)"),    this.nudUBatchSize, "Physical maximum batch size (default: 512).\nSmaller values reduce peak VRAM usage. (-ub)");
+            AddRow(tlpCtxCache, 4, MakeLbl("Cache Type K  (-ctk)"),  this.cbCacheK,      "KV cache data type for Keys (default: f16).\nAllowed: f32, f16, bf16, q8_0, q4_0, q4_1, iq4_nl, q5_0, q5_1.\nbf16 / q8_0 saves VRAM with minor quality loss. (-ctk)");
+            AddRow(tlpCtxCache, 5, MakeLbl("Cache Type V  (-ctv)"),  this.cbCacheV,      "KV cache data type for Values (default: f16).\nSame options as Cache Type K. (-ctv)");
             AddRow(tlpCtxCache, 6, MakeLbl("Defrag Threshold (-dt)"), this.nudDefragThold, "KV cache defragmentation threshold (default: -1 = disabled).\n0.0–1.0 = trigger defrag when fragmentation exceeds this ratio.\nHelps with long sessions that cycle many slots. (-dt)");
 
             var grpCtxCache = MakeGroup("Context && Cache");

@@ -104,7 +104,8 @@ namespace LlamaServerLauncher
             cbModel.SelectedIndexChanged += (_, _) => _ = UpdateModelMetaAsync();
             chkNglAuto.CheckedChanged += (_, _) =>
             {
-                nudGpuLayers.Enabled = !chkNglAuto.Checked;
+                nudGpuLayers.Visible = !chkNglAuto.Checked;
+                lblLayerCount.Visible = !chkNglAuto.Checked;
             };
             FormClosed      += (_, _) => { lock (_logLock) { _logWriter?.Dispose(); _logWriter = null; } };
             HandleCreated   += (_, _) => ApplyDwmDark(_isDark);
