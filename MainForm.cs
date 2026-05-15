@@ -92,6 +92,10 @@ namespace LlamaServerLauncher
         private readonly List<float> _metricsPrefillTokPerSec = new();
         private readonly List<int> _metricsPrefillCtxSize = new();
         private float _pendingPrefillTps = -1f;
+        private bool _pendingGenCtxUpdate;
+        private bool _pendingPpCtxUpdate;
+        private int _lastGenCtx;
+        private int _lastPpCtx;
         private readonly string _perfRequestsPath = "performance_requests.json";
 
         public MainForm()
@@ -100,14 +104,25 @@ namespace LlamaServerLauncher
             cbModel.SelectedIndexChanged += (_, _) => _ = UpdateModelMetaAsync();
             chkNglAuto.CheckedChanged += (_, _) =>
             {
-                trkGpuLayers.Enabled = !chkNglAuto.Checked;
-                UpdateNglDisplay();
+                nudGpuLayers.Enabled = !chkNglAuto.Checked;
             };
-            trkGpuLayers.Scroll += (_, _) => UpdateNglDisplay();
             FormClosed      += (_, _) => { lock (_logLock) { _logWriter?.Dispose(); _logWriter = null; } };
             HandleCreated   += (_, _) => ApplyDwmDark(_isDark);
             LoadConfig();
             ApplyTheme(_isDark);
+            // WinForms FlatStyle.Flat ignores ForeColor for disabled state, using SystemColors.GrayText
+            // which is nearly invisible on a dark background. Override with a visible dimmed color.
+            btnBrowseMmproj.Paint += (s, e) =>
+            {
+                var btn = (Button)s;
+                if (!_isDark || btn.Enabled) return;
+                var r = btn.ClientRectangle;
+                using var br = new SolidBrush(btn.BackColor);
+                e.Graphics.FillRectangle(br, new Rectangle(r.X + 1, r.Y + 1, r.Width - 2, r.Height - 2));
+                TextRenderer.DrawText(e.Graphics, btn.Text, btn.Font, r,
+                    Color.FromArgb(100, 100, 100),
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            };
             if (string.IsNullOrEmpty(txtExePath.Text))
                 txtExePath.Text = FindExe("llama-server.exe");
             _ = LoadHardwareInfoAsync();
@@ -225,28 +240,20 @@ namespace LlamaServerLauncher
             txtHostCustom.Text.Trim();
 
         private int GpuLayersValue =>
-            chkNglAuto.Checked                          ? -1  :
-            trkGpuLayers.Value == 0                     ?  0  :
-            trkGpuLayers.Value >= trkGpuLayers.Maximum  ? 999 :
-            trkGpuLayers.Value;
-
-        private void UpdateNglDisplay()
-        {
-            if (chkNglAuto.Checked)        lblNglDisplay.Text = "auto";
-            else if (trkGpuLayers.Value == 0) lblNglDisplay.Text = "CPU only";
-            else if (trkGpuLayers.Value >= trkGpuLayers.Maximum) lblNglDisplay.Text = "GPU only";
-            else lblNglDisplay.Text = $"{trkGpuLayers.Value} layers";
-        }
+            chkNglAuto.Checked                              ? -1  :
+            nudGpuLayers.Value == 0                         ?  0  :
+            nudGpuLayers.Value >= nudGpuLayers.Maximum      ? 999 :
+            (int)nudGpuLayers.Value;
 
         private void SetNglSlider(int ngl)
         {
             // ngl: -1=auto, 0=CPU only, 999=GPU only, N=custom
             if (ngl < 0) { chkNglAuto.Checked = true; return; }
             chkNglAuto.Checked = false;
-            trkGpuLayers.Value = ngl == 0   ? 0 :
-                                  ngl >= 999 ? trkGpuLayers.Maximum :
-                                  Math.Clamp(ngl, 0, trkGpuLayers.Maximum);
-            UpdateNglDisplay();
+            nudGpuLayers.Value = ngl == 0   ? 0 :
+                                  ngl >= 999 ? nudGpuLayers.Maximum :
+                                  Math.Clamp(ngl, 0, (int)nudGpuLayers.Maximum);
+
         }
 
         private string BuildCommand(string modelFile)
@@ -286,6 +293,8 @@ namespace LlamaServerLauncher
                 sb.Append(" -cb");
             if (!chkContextShift.Checked)
                 sb.Append(" --no-context-shift");
+            if (chkJinja.Checked)
+                sb.Append(" --jinja");
 
             // Cache
             if (cbCacheK.Text != "f16")
@@ -407,6 +416,8 @@ namespace LlamaServerLauncher
                 _metricsCpu.Clear(); _metricsRamGb.Clear(); _metricsGpuPct.Clear(); _metricsVramGb.Clear();
                 _metricsGenTokPerSec.Clear(); _metricsGenCtxSize.Clear(); _metricsPrefillTokPerSec.Clear(); _metricsPrefillCtxSize.Clear();
                 _pendingPrefillTps = -1f;
+                _pendingGenCtxUpdate = false; _pendingPpCtxUpdate = false;
+                _lastGenCtx = 0; _lastPpCtx = 0;
 
                 lock (_logLock)
                 {
@@ -546,7 +557,7 @@ namespace LlamaServerLauncher
 
             // Model tab
             chkNglAuto.Checked = true;
-            UpdateNglDisplay();
+
             chkCtxDefault.Checked = true;
             nudCtxSize.Value = 4096;
             nudBatchSize.Value = 2048;
@@ -561,6 +572,7 @@ namespace LlamaServerLauncher
             nudParallel.Value = 1;
             chkFlashAttn.Checked = false;
             chkContBatching.Checked = false;
+            chkJinja.Checked = false;
             chkContextShift.Checked = true;
             chkMmap.Checked = true;
             chkMlock.Checked = false;
@@ -736,9 +748,10 @@ namespace LlamaServerLauncher
                     _ = PollSlotsAsync((int)nudPort.Value);
 
                 int ctxMax = _ctxMax, ctxCur = _ctxCurrent;
-                graphCtx.AddSample(
-                    ctxMax > 0 ? ctxCur * 100f / ctxMax : 0,
-                    ctxMax > 0 ? $"{ctxCur} / {ctxMax}" : "—");
+                if (ctxMax > 0)
+                    graphCtx.AddSample(ctxCur, ctxMax, $"{ctxCur} / {ctxMax}");
+                else
+                    graphCtx.AddSample(0f, "—");
 
                 // ── Store last-known values and accumulate session samples ─
                 if (s.StoreCpu    >= 0) _lastCpu    = s.StoreCpu;
@@ -907,7 +920,7 @@ namespace LlamaServerLauncher
                            s.NglMode == 2 ? 999 :
                            (int)s.GpuLayers;
             SetNglSlider(savedNgl);
-            UpdateNglDisplay();
+
             chkCtxDefault.Checked       = s.CtxDefault;
             nudCtxSize.Value            = Clamp(s.CtxSize, nudCtxSize);
             nudBatchSize.Value          = Clamp(s.BatchSize, nudBatchSize);
@@ -923,6 +936,7 @@ namespace LlamaServerLauncher
             chkFlashAttn.Checked         = s.FlashAttn;
             chkContBatching.Checked      = s.ContBatching;
             chkContextShift.Checked      = s.ContextShift;
+            chkJinja.Checked             = s.Jinja;
             chkMmap.Checked              = s.Mmap;
             chkMlock.Checked             = s.Mlock;
             chkKvOffload.Checked         = s.KvOffload;
@@ -963,8 +977,8 @@ namespace LlamaServerLauncher
                 Folder         = _modelFolder ?? "",
                 ExePath        = txtExePath.Text,
                 Model          = cbModel.SelectedItem?.ToString() ?? "",
-                NglMode        = chkNglAuto.Checked ? 0 : trkGpuLayers.Value == 0 ? 1 : trkGpuLayers.Value >= trkGpuLayers.Maximum ? 2 : 3,
-                GpuLayers      = trkGpuLayers.Value,
+                NglMode        = chkNglAuto.Checked ? 0 : nudGpuLayers.Value == 0 ? 1 : nudGpuLayers.Value >= nudGpuLayers.Maximum ? 2 : 3,
+                GpuLayers      = nudGpuLayers.Value,
                 CtxDefault     = chkCtxDefault.Checked,
                 CtxSize        = (int)nudCtxSize.Value,
                 BatchSize      = (int)nudBatchSize.Value,
@@ -979,6 +993,7 @@ namespace LlamaServerLauncher
                 Parallel         = (int)nudParallel.Value,
                 FlashAttn        = chkFlashAttn.Checked,
                 ContBatching     = chkContBatching.Checked,
+                Jinja            = chkJinja.Checked,
                 ContextShift     = chkContextShift.Checked,
                 Mmap             = chkMmap.Checked,
                 Mlock            = chkMlock.Checked,
@@ -1247,6 +1262,7 @@ namespace LlamaServerLauncher
                                 _metricsPrefillTokPerSec.Add(tps);
                                 _metricsPrefillCtxSize.Add(ctx);
                                 _pendingPrefillTps = tps;
+                                _pendingPpCtxUpdate = true;
                             }
                             else
                             {
@@ -1254,6 +1270,7 @@ namespace LlamaServerLauncher
                                 _metricsGenCtxSize.Add(ctx);
                                 float prefill = _pendingPrefillTps;
                                 _pendingPrefillTps = -1f;
+                                _pendingGenCtxUpdate = true;
                                 this.BeginInvoke(new Action(() => SavePerfRequest(tps, prefill, ctx)));
                             }
                         }
@@ -1269,10 +1286,10 @@ namespace LlamaServerLauncher
                 if (m.Success && int.TryParse(m.Groups[1].Value, out int offloaded))
                     BeginInvoke(new Action(() =>
                     {
-                        int clamped = Math.Clamp(offloaded, 0, trkGpuLayers.Maximum);
-                        if (offloaded >= trkGpuLayers.Maximum) clamped = trkGpuLayers.Maximum;
-                        trkGpuLayers.Value = clamped;
-                        UpdateNglDisplay();
+                        int clamped = Math.Clamp(offloaded, 0, (int)nudGpuLayers.Maximum);
+                        if (offloaded >= (int)nudGpuLayers.Maximum) clamped = (int)nudGpuLayers.Maximum;
+                        nudGpuLayers.Value = clamped;
+            
                     }));
             }
 
@@ -1306,8 +1323,8 @@ namespace LlamaServerLauncher
                     var parts = new List<string>();
                     if (newCtx > 0) parts.Add($"• Context window reduced to {newCtx} tokens");
                     // Only report ngl if it was actually reduced below the model maximum
-                    bool nglReduced = newNgl > 0 && newNgl < trkGpuLayers.Maximum;
-                    if (nglReduced) parts.Add($"• GPU layers reduced to {newNgl} (of {trkGpuLayers.Maximum})");
+                    bool nglReduced = newNgl > 0 && newNgl < (int)nudGpuLayers.Maximum;
+                    if (nglReduced) parts.Add($"• GPU layers reduced to {newNgl} (of {(int)nudGpuLayers.Maximum})");
 
                     if (parts.Count == 0) return; // nothing significant changed — no need to interrupt
 
@@ -1347,7 +1364,7 @@ namespace LlamaServerLauncher
                     MessageBox.Show(this,
                         "The server could not reserve VRAM headroom because GPU Layers is set to \"GPU only\" (-ngl 999).\n\n" +
                         $"The auto-fit algorithm reduced your context size to {newCtx} tokens instead.\n\n" +
-                        "To let the fit algorithm also adjust layer count: uncheck \"Auto\" on the GPU Layers slider and move it away from the GPU-only end.",
+                        "To let the fit algorithm also adjust layer count: uncheck \"Auto\" on the GPU Layers control and set it below the GPU-only maximum.",
                         "Context auto-reduced — GPU layers locked",
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Warning);
@@ -1554,16 +1571,16 @@ namespace LlamaServerLauncher
             _modelLayerCount  = layers > 0 ? (int)layers : 0;
             _modelDefaultCtx  = ctx    > 0 ? (int)ctx    : 0;
             lblCtxSize.Text    = ctx    > 0 ? $"({ctx})"       : "";
-            lblLayerCount.Text = layers > 0 ? $"({layers + 1} layers)" : "";
+            lblLayerCount.Text = layers > 0 ? $"/ {layers + 1}" : "";
             UpdateCtxPerSlot();
             if (_modelLayerCount > 0)
             {
                 // llama.cpp counts block_count + 1 output layer, so ngl max = block_count + 1
                 int nglMax = _modelLayerCount + 1;
-                bool wasAtMax = trkGpuLayers.Value >= trkGpuLayers.Maximum;
-                trkGpuLayers.Maximum = nglMax;
-                trkGpuLayers.Value = wasAtMax ? nglMax : Math.Clamp(trkGpuLayers.Value, 0, nglMax);
-                UpdateNglDisplay();
+                bool wasAtMax = nudGpuLayers.Value >= nudGpuLayers.Maximum;
+                nudGpuLayers.Maximum = nglMax;
+                nudGpuLayers.Value = wasAtMax ? nglMax : Math.Clamp((int)nudGpuLayers.Value, 0, nglMax);
+    
             }
         }
 
@@ -1675,11 +1692,15 @@ namespace LlamaServerLauncher
             // Rolling average of the last 5 completed-request tok/s values
             float recentTps = -1;
             double recentCtx = 0;
+            // Latch context from slots API when a new t/s value has been recorded
+            if (_pendingGenCtxUpdate) { _lastGenCtx = _nPastSlots > 0 ? _nPastSlots : _ctxCurrent; _pendingGenCtxUpdate = false; }
+            if (_pendingPpCtxUpdate)  { _lastPpCtx  = _nPastSlots > 0 ? _nPastSlots : _ctxCurrent; _pendingPpCtxUpdate  = false; }
+
             if (_metricsGenTokPerSec.Count > 0)
             {
                 int take = Math.Min(5, _metricsGenTokPerSec.Count);
                 recentTps = (float)_metricsGenTokPerSec.Skip(_metricsGenTokPerSec.Count - take).Average();
-                recentCtx = _nPastSlots > 0 ? _nPastSlots : _ctxCurrent;
+                recentCtx = _lastGenCtx;
             }
 
             float recentPpTps = -1;
@@ -1688,7 +1709,7 @@ namespace LlamaServerLauncher
             {
                 int take = Math.Min(5, _metricsPrefillTokPerSec.Count);
                 recentPpTps = (float)_metricsPrefillTokPerSec.Skip(_metricsPrefillTokPerSec.Count - take).Average();
-                recentCcx = _nPastSlots > 0 ? _nPastSlots : _ctxCurrent;
+                recentCcx = _lastPpCtx;
             }
 
             if (!serverRunning)
@@ -1696,7 +1717,7 @@ namespace LlamaServerLauncher
                 // Static pre-flight advice based on current settings
                 int nglTip = GpuLayersValue;
                 if (hasGpu && nglTip == 0)
-                    Line("▶ GPU layers set to CPU only — model will run entirely on CPU. Switch to \"GPU only\" or \"Custom\" to use the GPU.", amber);
+                    Line("▶ GPU layers set to 0 — model will run entirely on CPU. Set GPU Layers to a higher value to offload layers to the GPU.", amber);
                 else if (hasGpu && nglTip == -1)
                     Line("▶ GPU layers is Auto. Try a Custom value if GPU usage seems low after starting.", dim);
 
@@ -2037,6 +2058,7 @@ namespace LlamaServerLauncher
             // ── Reset all other settings to their defaults ─────────────────
             nudParallel.Value          = 1;
             chkContBatching.Checked    = false;
+            chkJinja.Checked           = false;
             chkMmap.Checked            = true;
             chkMlock.Checked           = false;
             nudDefragThold.Value       = Clamp(-1M, nudDefragThold);
@@ -2077,6 +2099,7 @@ namespace LlamaServerLauncher
             public decimal Parallel          { get; set; } = 1;
             public bool    FlashAttn         { get; set; } = false;
             public bool    ContBatching      { get; set; } = false;
+            public bool    Jinja             { get; set; } = false;
             public bool    ContextShift      { get; set; } = true;
             public bool    Mmap              { get; set; } = true;
             public bool    Mlock             { get; set; } = false;

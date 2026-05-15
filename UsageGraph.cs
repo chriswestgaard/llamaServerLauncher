@@ -16,12 +16,53 @@ namespace LlamaServerLauncher
         public string Title      { get; set; } = "";
         public string ValueText  { get; set; } = "";
 
+        // ── Fixed-scale mode (CPU / RAM / GPU / VRAM) ──────────────────────
         public void AddSample(float pct, string valueText)
         {
-            while (_samples.Count >= MaxSamples) _samples.Dequeue();
-            _samples.Enqueue(Math.Clamp(pct, 0f, 100f));
+            _ceiling     = 100f;
+            _absoluteMax = 100f;
+            Enqueue(pct);
             ValueText = valueText;
             if (IsHandleCreated) Invalidate();
+        }
+
+        // ── Dynamic-scale mode (Context) ────────────────────────────────────
+        // ceiling grows in powers-of-two (1024, 2048, 4096 …) as value rises,
+        // then is capped at maximum. Resets automatically on model change.
+        private float _ceiling     = 0f;
+        private float _absoluteMax = 100f;
+
+        public void AddSample(float value, float maximum, string valueText)
+        {
+            if (maximum < 1f) maximum = 1f;
+
+            // Reset ceiling whenever the hard maximum changes (new model loaded).
+            if (Math.Abs(maximum - _absoluteMax) > 0.5f)
+            {
+                _absoluteMax = maximum;
+                _ceiling     = 0f;
+            }
+
+            if (_ceiling <= 0f) _ceiling = NiceCeiling(1024f, maximum);
+            if (value > _ceiling * 0.85f) _ceiling = NiceCeiling(value * 1.25f, maximum);
+
+            Enqueue(value);
+            ValueText = valueText;
+            if (IsHandleCreated) Invalidate();
+        }
+
+        private void Enqueue(float v)
+        {
+            while (_samples.Count >= MaxSamples) _samples.Dequeue();
+            _samples.Enqueue(v);
+        }
+
+        // Next power-of-two ≥ 1024 that fits above target, capped at maximum.
+        private static float NiceCeiling(float target, float maximum)
+        {
+            float c = 1024f;
+            while (c < target && c < maximum) c *= 2f;
+            return Math.Min(c, maximum);
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -44,6 +85,7 @@ namespace LlamaServerLauncher
             var samples = _samples.ToArray();
             if (samples.Length >= 2)
             {
+                float scale  = _ceiling > 0f ? 100f / _ceiling : 1f;
                 float step   = w / (float)(MaxSamples - 1);
                 int   offset = MaxSamples - samples.Length;
                 int   inner  = h - 2;
@@ -51,7 +93,10 @@ namespace LlamaServerLauncher
                 var pts = new PointF[samples.Length + 2];
                 pts[0] = new PointF(offset * step, h);
                 for (int i = 0; i < samples.Length; i++)
-                    pts[i + 1] = new PointF((offset + i) * step, h - samples[i] / 100f * inner);
+                {
+                    float pct = Math.Clamp(samples[i] * scale, 0f, 100f);
+                    pts[i + 1] = new PointF((offset + i) * step, h - pct / 100f * inner);
+                }
                 pts[^1] = new PointF(w, h);
 
                 using (var fill = new SolidBrush(Color.FromArgb(65, GraphColor)))
