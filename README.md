@@ -3,7 +3,7 @@
 
 A Windows desktop GUI for launching and managing [llama-server](https://github.com/ggml-org/llama.cpp) (llama.cpp).
 
-<img width="746" height="620" alt="Screenshot 2026-05-14 132106" src="https://github.com/user-attachments/assets/3b06dfac-2240-4bdc-8de8-a2ee71b24fae" />
+<img width="739" height="617" alt="Screenshot 2026-05-15 133107" src="https://github.com/user-attachments/assets/ce69d636-a208-4a6a-85ff-7e9e1e4bfc1e" />
 
 ## Features
 
