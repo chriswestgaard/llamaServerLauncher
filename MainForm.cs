@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
@@ -9,6 +9,8 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Drawing;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 using System.Text.Json;
 
@@ -34,6 +36,17 @@ namespace LlamaServerLauncher
         private List<PerformanceCounter> _gpuVramCounters = [];
         private long _gpuTotalVramBytes;
         private int _monitorTick;
+
+        private bool _isDark;
+
+        [DllImport("dwmapi.dll")]
+        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
+
+        private void ApplyDwmDark(bool dark)
+        {
+            if (!IsHandleCreated) return;
+            try { int v = dark ? 1 : 0; DwmSetWindowAttribute(Handle, 20, ref v, 4); } catch { }
+        }
 
         // Last-known metric snapshot (updated each monitor tick)
         private float _lastCpu = -1, _lastGpuPct = -1, _lastVramGb = -1;
@@ -83,8 +96,10 @@ namespace LlamaServerLauncher
                 UpdateNglDisplay();
             };
             trkGpuLayers.Scroll += (_, _) => UpdateNglDisplay();
-            FormClosed += (_, _) => { lock (_logLock) { _logWriter?.Dispose(); _logWriter = null; } };
+            FormClosed      += (_, _) => { lock (_logLock) { _logWriter?.Dispose(); _logWriter = null; } };
+            HandleCreated   += (_, _) => ApplyDwmDark(_isDark);
             LoadConfig();
+            ApplyTheme(_isDark);
             if (string.IsNullOrEmpty(txtExePath.Text))
                 txtExePath.Text = FindExe("llama-server.exe");
             _ = LoadHardwareInfoAsync();
@@ -910,6 +925,7 @@ namespace LlamaServerLauncher
             chkMmproj.Checked           = s.MmprojEnabled;
             _mmprojPath                 = s.MmprojPath ?? "";
             txtMmprojPath.Text          = _mmprojPath;
+            _isDark                     = s.IsDark;
         }
 
         private void SaveConfig()
@@ -959,8 +975,173 @@ namespace LlamaServerLauncher
                 ExtraArgs         = txtExtraArgs.Text,
                 MmprojEnabled     = chkMmproj.Checked,
                 MmprojPath        = _mmprojPath,
+                IsDark            = _isDark,
             };
             try { File.WriteAllText(_configPath, JsonSerializer.Serialize(s, _jsonOptsIndented)); } catch { }
+        }
+
+        private void ApplyTheme(bool dark)
+        {
+            _isDark = dark;
+            var formBg  = dark ? Color.FromArgb(32, 32, 32)   : SystemColors.Control;
+            var inputBg = dark ? Color.FromArgb(50, 50, 50)   : SystemColors.Window;
+            var fg      = dark ? Color.FromArgb(210, 210, 210) : SystemColors.ControlText;
+
+            void Style(Control c)
+            {
+                switch (c)
+                {
+                    case UsageGraph: return;
+                    case Button btn when btn == btnResetDefaults || btn == btnDarkMode: break;
+                    case Button btn when btn == btnClearLog:
+                        btn.UseVisualStyleBackColor = false;
+                        btn.FlatStyle  = FlatStyle.Flat;
+                        btn.BackColor  = Color.FromArgb(20, 20, 20);
+                        btn.ForeColor  = Color.FromArgb(180, 180, 180);
+                        btn.FlatAppearance.BorderColor = Color.FromArgb(50, 50, 50);
+                        break;
+                    case RichTextBox rtb when rtb == rtbLog || rtb == rtbTips:
+                        rtb.BackColor = Color.Black;
+                        rtb.ForeColor = Color.LightGray;
+                        break;
+                    case RichTextBox rtb:
+                        rtb.BackColor = dark ? Color.Black     : SystemColors.Window;
+                        rtb.ForeColor = dark ? Color.LightGray : SystemColors.WindowText;
+                        break;
+                    case TreeView tv when tv == treePerf:
+                        tv.BackColor = Color.Black;
+                        tv.ForeColor = Color.LightGray;
+                        break;
+                    case TreeView tv:
+                        tv.BackColor = dark ? Color.Black     : SystemColors.Window;
+                        tv.ForeColor = dark ? Color.LightGray : SystemColors.WindowText;
+                        break;
+                    case TextBox txt when txt == txtCmdPreview:
+                        txt.BackColor = dark ? Color.FromArgb(40, 40, 40)    : SystemColors.ControlLight;
+                        txt.ForeColor = dark ? Color.FromArgb(170, 170, 170) : SystemColors.ControlText;
+                        break;
+                    case TextBox txt:
+                        txt.BackColor = inputBg; txt.ForeColor = fg;
+                        break;
+                    case NumericUpDown nud:
+                        nud.BackColor = inputBg; nud.ForeColor = fg;
+                        break;
+                    case ComboBox cb:
+                        cb.BackColor = inputBg; cb.ForeColor = fg;
+                        break;
+                    case Button btn:
+                        btn.UseVisualStyleBackColor = !dark;
+                        btn.FlatStyle = dark ? FlatStyle.Flat : FlatStyle.Standard;
+                        btn.BackColor = dark ? Color.FromArgb(55, 55, 55) : SystemColors.ButtonFace;
+                        btn.ForeColor = dark ? fg                          : SystemColors.ControlText;
+                        if (dark) btn.FlatAppearance.BorderColor = Color.FromArgb(80, 80, 80);
+                        break;
+                    case Label lbl:
+                        lbl.BackColor = Color.Transparent; lbl.ForeColor = fg;
+                        break;
+                    case CheckBox chk:
+                        chk.BackColor = Color.Transparent; chk.ForeColor = fg;
+                        break;
+                    case RadioButton rb:
+                        rb.BackColor = Color.Transparent; rb.ForeColor = fg;
+                        break;
+                    case GroupBox grp:
+                        grp.BackColor = formBg;
+                        grp.ForeColor = dark ? Color.FromArgb(160, 160, 160) : SystemColors.ControlText;
+                        break;
+                    default:
+                        c.BackColor = formBg;
+                        break;
+                }
+                foreach (Control child in c.Controls)
+                    Style(child);
+            }
+
+            this.BackColor = formBg;
+            foreach (Control c in this.Controls)
+                Style(c);
+
+            // FlatButtons appearance gives DrawItem full control; Normal for light mode
+            tabMain.Appearance       = dark ? TabAppearance.FlatButtons : TabAppearance.Normal;
+            tabMain.StripColor       = formBg;
+            tabMain.SelectedTabColor   = dark ? Color.FromArgb(0, 120, 212) : Color.Empty;
+            tabMain.UnselectedTabColor = dark ? Color.FromArgb(32, 32, 32)  : Color.Empty;
+
+            // Fix tab page content area (UseVisualStyleBackColor overrides BackColor by default)
+            foreach (TabPage tp in tabMain.TabPages)
+            {
+                tp.UseVisualStyleBackColor = !dark;
+                tp.BackColor = (tp == tabLog || tp == tabPerf) ? Color.Black : formBg;
+            }
+
+            // ComboBox.BackColor is ignored by visual styles — switch to owner draw in dark mode
+            void ApplyComboOwnerDraw(Control c)
+            {
+                if (c is ComboBox cb)
+                {
+                    cb.DrawItem -= ComboBoxDrawItem_Dark;
+                    if (dark) { cb.DrawMode = DrawMode.OwnerDrawFixed; cb.DrawItem += ComboBoxDrawItem_Dark; }
+                    else        cb.DrawMode = DrawMode.Normal;
+                }
+                foreach (Control child in c.Controls)
+                    ApplyComboOwnerDraw(child);
+            }
+            ApplyComboOwnerDraw(this);
+
+            ApplyDwmDark(dark);
+
+            // moon (E708) shown in light mode; sun (E706) shown in dark mode
+            btnDarkMode.Text = dark ? "" : "";
+            tabMain.Invalidate();
+            btnOpenChat.Invalidate();
+        }
+
+        private void tabMain_DrawItem(object sender, DrawItemEventArgs e)
+        {
+            var tab = tabMain.TabPages[e.Index];
+            bool selected = tabMain.SelectedIndex == e.Index;
+
+            if (_isDark)
+            {
+                var bgColor = selected ? Color.FromArgb(0, 120, 212) : Color.FromArgb(32, 32, 32);
+                using var bgBrush = new SolidBrush(bgColor);
+                // Inflate to paint over the system FlatButton borders so adjacent tabs don't show thick dividers
+                e.Graphics.FillRectangle(bgBrush, Rectangle.Inflate(e.Bounds, 3, 2));
+
+                var textColor = selected ? Color.White : Color.FromArgb(140, 140, 140);
+                TextRenderer.DrawText(e.Graphics, tab.Text, tabMain.Font, e.Bounds, textColor,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            }
+            else
+            {
+                e.DrawBackground();
+                TextRenderer.DrawText(e.Graphics, tab.Text, tabMain.Font, e.Bounds, SystemColors.ControlText,
+                    TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            }
+        }
+
+        private void ComboBoxDrawItem_Dark(object sender, DrawItemEventArgs e)
+        {
+            if (e.Index < 0 || sender is not ComboBox cb) return;
+            bool selected = (e.State & DrawItemState.Selected) != 0;
+            using var bg = new SolidBrush(selected ? Color.FromArgb(60, 90, 120) : Color.FromArgb(50, 50, 50));
+            e.Graphics.FillRectangle(bg, e.Bounds);
+            var text = cb.Items[e.Index]?.ToString() ?? "";
+            TextRenderer.DrawText(e.Graphics, text, cb.Font,
+                Rectangle.Inflate(e.Bounds, -2, 0), Color.FromArgb(210, 210, 210),
+                TextFormatFlags.Left | TextFormatFlags.VerticalCenter);
+        }
+
+        private void btnOpenChat_Paint(object sender, PaintEventArgs e)
+        {
+            if (!_isDark || sender is not Button btn) return;
+            var bg = btn.Enabled ? Color.FromArgb(55, 55, 55) : Color.FromArgb(42, 42, 42);
+            using (var br = new SolidBrush(bg)) e.Graphics.FillRectangle(br, btn.ClientRectangle);
+            using (var pen = new Pen(Color.FromArgb(75, 75, 75)))
+                e.Graphics.DrawRectangle(pen, 0, 0, btn.Width - 1, btn.Height - 1);
+            var fg = btn.Enabled ? Color.FromArgb(210, 210, 210) : Color.FromArgb(110, 110, 110);
+            TextRenderer.DrawText(e.Graphics, btn.Text, btn.Font, btn.ClientRectangle, fg,
+                TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
         }
 
         private static readonly Regex _tokPerSecRx = new(@"([\d.]+)\s+tokens per second", RegexOptions.Compiled);
@@ -1608,13 +1789,6 @@ namespace LlamaServerLauncher
             RefreshPerfLog();
         }
 
-        private void btnClearPerf_Click(object sender, EventArgs e)
-        {
-            try { if (File.Exists(_perfLogPath)) File.Delete(_perfLogPath); } catch { }
-            try { if (File.Exists(_perfRequestsPath)) File.Delete(_perfRequestsPath); } catch { }
-            RefreshPerfLog();
-        }
-
         private void RefreshPerfLog()
         {
             static string FmtTps(double v) => v >= 0 ? $"{v:F1}" : "—";
@@ -1874,6 +2048,7 @@ namespace LlamaServerLauncher
             public string  ExtraArgs         { get; set; } = "";
             public bool    MmprojEnabled     { get; set; } = false;
             public string  MmprojPath        { get; set; } = "";
+            public bool    IsDark            { get; set; } = false;
         }
 
         private static readonly Regex _rxCtx        = new(@"(?:-c|--ctx-size)\s+(\d+)",         RegexOptions.Compiled);

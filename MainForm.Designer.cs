@@ -8,7 +8,7 @@ namespace LlamaServerLauncher
         private System.ComponentModel.IContainer components = null;
 
         // Tabs
-        private TabControl tabMain;
+        private DarkTabControl tabMain;
         private TabPage tabModel, tabServer, tabSampling, tabAdvanced, tabLog, tabPerf;
 
         // Log tab
@@ -17,7 +17,6 @@ namespace LlamaServerLauncher
 
         // Perf tab
         private TreeView treePerf;
-        private Button btnClearPerf;
 
         // Model tab
         private RichTextBox rtbTips;
@@ -58,7 +57,7 @@ namespace LlamaServerLauncher
         private CheckBox chkEmbedding, chkRerank, chkMetrics;
 
         // Model tab buttons (top right)
-        private Button btnResetDefaults, btnOpenChat;
+        private Button btnResetDefaults, btnOpenChat, btnDarkMode;
 
        // Bottom chrome
         private TableLayoutPanel tlpMain;
@@ -85,7 +84,7 @@ namespace LlamaServerLauncher
             _tip = new ToolTip { AutomaticDelay = 300, AutoPopDelay = 10000, InitialDelay = 300 };
 
             // ── Instantiate field controls ──────────────────────────────────
-            this.tabMain        = new TabControl();
+            this.tabMain        = new DarkTabControl();
             this.tabModel       = new TabPage { Text = "Model"    };
             this.tabServer      = new TabPage { Text = "Server"   };
             this.tabSampling    = new TabPage { Text = "Sampling" };
@@ -172,6 +171,20 @@ namespace LlamaServerLauncher
                 Padding = new Padding(0)
             };
             _tip.SetToolTip(this.btnResetDefaults, "Reset all parameters to default values");
+            this.btnDarkMode = new Button
+            {
+                Text = "",
+                Size = new Size(44, 44),
+                Margin = new Padding(0, 4, 4, 4),
+                Font = new Font("Segoe MDL2 Assets", this.Font.Size + 4F, FontStyle.Regular),
+                FlatStyle = FlatStyle.Standard,
+                BackColor = Color.FromArgb(50, 70, 90),
+                ForeColor = Color.White,
+                UseVisualStyleBackColor = false,
+                TextAlign = ContentAlignment.MiddleCenter,
+                Padding = new Padding(0)
+            };
+            _tip.SetToolTip(this.btnDarkMode, "Toggle dark/light theme");
             this.btnOpenChat      = new Button { Text = "Open Chat UI", Dock = DockStyle.Fill, Margin = new Padding(0, 4, 0, 4), Font = new Font(this.Font, FontStyle.Bold), Enabled = false };
 
             this.tlpMain       = new TableLayoutPanel();
@@ -682,17 +695,15 @@ namespace LlamaServerLauncher
             };
             this.treePerf.MouseLeave += (_, _) => this.treePerf.Cursor = Cursors.Default;
 
-            this.btnClearPerf = new Button { Text = "Clear Log", Dock = DockStyle.Right, Width = 90 };
-            this.btnClearPerf.Click += btnClearPerf_Click;
-            var pnlPerfBottom = new Panel { Dock = DockStyle.Bottom, Height = 34 };
-            pnlPerfBottom.Controls.Add(this.btnClearPerf);
-
             this.tabPerf.Controls.Add(this.treePerf);
-            this.tabPerf.Controls.Add(pnlPerfBottom);
 
             // ── TAB CONTROL ──────────────────────────────────────────────
             this.tabMain.TabPages.AddRange(new TabPage[] { tabModel, tabServer, tabSampling, tabAdvanced, tabLog, tabPerf });
-            this.tabMain.Dock = DockStyle.Fill;
+            this.tabMain.Dock     = DockStyle.Fill;
+            this.tabMain.DrawMode = TabDrawMode.OwnerDrawFixed;
+            this.tabMain.SizeMode = TabSizeMode.Fixed;
+            this.tabMain.ItemSize = new Size(92, 26);
+            this.tabMain.DrawItem += tabMain_DrawItem;
             this.tabMain.SelectedIndexChanged += (_, _) =>
             {
                 if (tabMain.SelectedTab == tabPerf) RefreshPerfLog();
@@ -710,15 +721,17 @@ namespace LlamaServerLauncher
             this.tlpMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 72F));   // cmd preview
             this.tlpMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));   // status + launch
 
-            // Status label on left, Open Chat + Launch buttons on right — all in one row
-            var tlpStatusBar = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Margin = new Padding(0) };
+            // Status label on left, dark mode toggle + Open Chat + Launch buttons on right — all in one row
+            var tlpStatusBar = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 1, Margin = new Padding(0) };
             tlpStatusBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));    // status fills
+            tlpStatusBar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 52F));    // dark mode toggle
             tlpStatusBar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180F));   // open chat ui
             tlpStatusBar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 240F));   // launch fixed width
             tlpStatusBar.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
             tlpStatusBar.Controls.Add(this.lblStatus,   0, 0);
-            tlpStatusBar.Controls.Add(this.btnOpenChat, 1, 0);
-            tlpStatusBar.Controls.Add(this.btnLaunch,   2, 0);
+            tlpStatusBar.Controls.Add(this.btnDarkMode, 1, 0);
+            tlpStatusBar.Controls.Add(this.btnOpenChat, 2, 0);
+            tlpStatusBar.Controls.Add(this.btnLaunch,   3, 0);
 
             var lblCmdHint = new Label { Text = "Command preview — click to copy", Dock = DockStyle.Fill, Font = new Font(this.Font.FontFamily, 7F), ForeColor = System.Drawing.SystemColors.GrayText, TextAlign = System.Drawing.ContentAlignment.MiddleLeft, Padding = new Padding(2, 0, 0, 0) };
             this.tlpMain.Controls.Add(this.tabMain,       0, 0);
@@ -734,6 +747,8 @@ namespace LlamaServerLauncher
             this.btnBrowseMmproj.Click += btnBrowseMmproj_Click;
             this.btnResetDefaults.Click += btnResetDefaults_Click;
             this.btnOpenChat.Click      += btnOpenChat_Click;
+            this.btnOpenChat.Paint      += btnOpenChat_Paint;
+            this.btnDarkMode.Click      += (_, _) => { ApplyTheme(!_isDark); SaveConfig(); };
 
 
             void refreshPreview(object s, System.EventArgs e) => UpdateCommandPreview();
