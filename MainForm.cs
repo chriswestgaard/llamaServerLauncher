@@ -56,7 +56,8 @@ namespace LlamaServerLauncher
         private bool _monitorBusy;
 
         // Context usage — populated by /slots API polling (log parsing used as fallback on startup)
-            private int _ctxMax, _ctxCurrent;
+        private int _ctxMax, _ctxCurrent;
+        private int _nPastSlots; // n_past from /slots API; used for perf metrics to reflect full conversation context
         private volatile bool _pollingSlotsInProgress;
         private volatile bool _serverReady;
         private string _chatUiUrl;
@@ -860,6 +861,7 @@ namespace LlamaServerLauncher
                     if (slot.TryGetProperty("n_ctx",  out var c)) nCtx  = Math.Max(nCtx,  c.GetInt32());
                 }
                 if (nCtx  > 0) _ctxMax = nCtx;
+                if (nPast > 0) _nPastSlots = nPast;
                 // Only advance — keeps last value when slots are idle between requests
                 if (nPast > _ctxCurrent) _ctxCurrent = nPast;
             }
@@ -1212,19 +1214,22 @@ namespace LlamaServerLauncher
                     {
                         lock (_metricsLock)
                         {
+                            // Prefer n_past from /slots API (full conversation context) over log-based
+                            // n_tokens (which reflects only the current batch size, not total context).
+                            int ctx = _nPastSlots > 0 ? _nPastSlots : _ctxCurrent;
                             if (text.Contains("prompt eval"))
                             {
                                 _metricsPrefillTokPerSec.Add(tps);
-                                _metricsPrefillCtxSize.Add(_ctxCurrent);
+                                _metricsPrefillCtxSize.Add(ctx);
                                 _pendingPrefillTps = tps;
                             }
                             else
                             {
                                 _metricsGenTokPerSec.Add(tps);
-                                _metricsGenCtxSize.Add(_ctxCurrent);
+                                _metricsGenCtxSize.Add(ctx);
                                 float prefill = _pendingPrefillTps;
                                 _pendingPrefillTps = -1f;
-                                this.BeginInvoke(new Action(() => SavePerfRequest(tps, prefill, _ctxCurrent)));
+                                this.BeginInvoke(new Action(() => SavePerfRequest(tps, prefill, ctx)));
                             }
                         }
                     }
