@@ -26,9 +26,9 @@ namespace LlamaServerLauncher
         private CheckBox chkMmproj;
         private TextBox txtMmprojPath;
         private Button btnBrowseMmproj;
-        private TrackBar trkGpuLayers;
+        private NumericUpDown nudGpuLayers;
         private CheckBox chkNglAuto;
-        private Label lblNglDisplay, lblLayerCount, lblCtxSize, lblCtxPerSlot;
+        private Label lblLayerCount, lblCtxSize, lblCtxPerSlot;
         private NumericUpDown nudCtxSize;
         private CheckBox chkThreadsAuto, chkCtxDefault, chkSeedRandom;
         private TextBox txtCpuInfo, txtGpuInfo;
@@ -38,7 +38,7 @@ namespace LlamaServerLauncher
         private RadioButton rdoHostLocal, rdoHostAll, rdoHostCustom;
         private TextBox txtHostCustom, txtTools;
         private NumericUpDown nudPort, nudThreads, nudParallel, nudBatchSize, nudUBatchSize;
-        private CheckBox chkFlashAttn, chkContBatching;
+        private CheckBox chkFlashAttn, chkContBatching, chkJinja;
 
         // Cache tab
         private ComboBox cbCacheK, cbCacheV, cbReasoning, cbSplitMode;
@@ -97,9 +97,8 @@ namespace LlamaServerLauncher
             this.btnBrowseMmproj  = new Button   { Text = "…", Dock = DockStyle.Fill, Enabled = false, MinimumSize = new Size(0, 28), Margin = new Padding(4, 0, 0, 0) };
             this.cbModel         = new ComboBox  { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
             this.chkNglAuto    = new CheckBox { Text = "Auto", AutoSize = true, Checked = true, Margin = new Padding(0, 5, 6, 0) };
-            this.trkGpuLayers  = new TrackBar { Minimum = 0, Maximum = 200, Value = 200, TickStyle = TickStyle.None, AutoSize = false, Height = 28, Dock = DockStyle.Fill, Enabled = false };
-            this.lblNglDisplay = new Label { AutoSize = true, ForeColor = System.Drawing.Color.DimGray, TextAlign = System.Drawing.ContentAlignment.MiddleLeft, Margin = new Padding(4, 5, 4, 0) };
-            this.lblLayerCount = new Label { AutoSize = true, ForeColor = System.Drawing.Color.DimGray, Margin = new Padding(0, 5, 0, 0), Text = "" };
+            this.nudGpuLayers  = new NumericUpDown { Minimum = 0, Maximum = 200, Value = 200, Dock = DockStyle.Fill, Enabled = false };
+this.lblLayerCount = new Label { AutoSize = true, ForeColor = System.Drawing.Color.DimGray, Margin = new Padding(0, 5, 0, 0), Text = "" };
             this.chkCtxDefault   = new CheckBox { Text = "Model default", AutoSize = true, Checked = true, Margin = new Padding(0, 2, 12, 0) };
             this.lblCtxSize      = new Label { AutoSize = true, ForeColor = System.Drawing.Color.DimGray, Margin = new Padding(0, 4, 0, 0), Text = "" };
             this.lblCtxPerSlot   = new Label { AutoSize = true, ForeColor = System.Drawing.Color.DimGray, Margin = new Padding(6, 4, 0, 0), Text = "" };
@@ -124,6 +123,7 @@ namespace LlamaServerLauncher
             this.nudUBatchSize   = new NumericUpDown { Dock = DockStyle.Fill, Minimum = 1,  Maximum = 65536, Value = 512  };
             this.chkFlashAttn    = new CheckBox { Text = "Flash Attention",    AutoSize = true, Checked = false };
             this.chkContBatching = new CheckBox { Text = "Continuous Batching", AutoSize = true, Checked = false };
+            this.chkJinja        = new CheckBox { Text = "Jinja Templates",     AutoSize = true, Checked = false };
             this.txtTools        = new TextBox  { Dock = DockStyle.Fill, Text = "" };
 
             this.cbCacheK    = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
@@ -204,7 +204,7 @@ namespace LlamaServerLauncher
             var tlpModel = MakeTlp(10);
 
             tlpModel.RowStyles[4] = new RowStyle(SizeType.Absolute, 160F);  // HW side-by-side panel
-            tlpModel.RowStyles[5] = new RowStyle(SizeType.Absolute, 110F);  // Context graph
+            tlpModel.RowStyles[5] = new RowStyle(SizeType.Absolute, 130F);  // Context graph
             tlpModel.RowStyles[6] = new RowStyle(SizeType.Absolute, 36F);   // Perf Observations label
             tlpModel.RowStyles[7] = new RowStyle(SizeType.Absolute, 110F);  // Perf Observations box
 
@@ -256,17 +256,15 @@ namespace LlamaServerLauncher
             // ── GroupBox: GPU & Threading (left half, row 2) ─────────────
             var tlpGpuThreading = MakeTlp(5, 165);
 
-            var tlpNgl = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 1, Margin = new Padding(0), AutoSize = true };
+            var tlpNgl = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Margin = new Padding(0), AutoSize = true };
             tlpNgl.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             tlpNgl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             tlpNgl.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            tlpNgl.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             tlpNgl.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             tlpNgl.Controls.Add(this.chkNglAuto,    0, 0);
-            tlpNgl.Controls.Add(this.trkGpuLayers,  1, 0);
-            tlpNgl.Controls.Add(this.lblNglDisplay, 2, 0);
-            tlpNgl.Controls.Add(this.lblLayerCount, 3, 0);
-            AddRow(tlpGpuThreading, 0, MakeLbl("GPU Layers  (-ngl)"), tlpNgl, "Number of model layers to offload to GPU VRAM.\nSlide left = CPU only (0 layers).\nSlide right = GPU only (all layers, -ngl 999).\nAuto = server decides at startup. (-ngl)");
+            tlpNgl.Controls.Add(this.nudGpuLayers,  1, 0);
+            tlpNgl.Controls.Add(this.lblLayerCount, 2, 0);
+            AddRow(tlpGpuThreading, 0, MakeLbl("GPU Layers  (-ngl)"), tlpNgl, "Number of model layers to offload to GPU VRAM.\n0 = CPU only. Max value = GPU only (-ngl 999).\nAuto = server decides at startup. (-ngl)");
             AddRow(tlpGpuThreading, 1, MakeLbl("Split Mode  (-sm)"),  this.cbSplitMode, "Multi-GPU tensor split strategy (default: layer).\nlayer  = split by layers across GPUs.\nnone   = single GPU only.\nrow    = split by matrix rows.\ntensor = split by tensor dimensions. (-sm)");
 
             var pnlThreads = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
@@ -319,7 +317,7 @@ namespace LlamaServerLauncher
             var grpCtxCache = MakeGroup("Context && Cache");
             grpCtxCache.Controls.Add(tlpCtxCache);
 
-            // ── GroupBox: Features (full-width bottom row) ───────────────
+            // ── GroupBox: Features (right column) ────────────────────────
             // Reasoning labeled row at top, checkboxes flowing horizontally below
             var tlpReasoning = new TableLayoutPanel
             {
@@ -337,7 +335,7 @@ namespace LlamaServerLauncher
             var flwFeatureChecks = new FlowLayoutPanel
             {
                 Dock = DockStyle.Top, AutoSize = true,
-                WrapContents = true, FlowDirection = FlowDirection.LeftToRight,
+                WrapContents = false, FlowDirection = FlowDirection.TopDown,
                 Padding = new Padding(4, 2, 4, 4)
             };
             flwFeatureChecks.Controls.Add(MakeCheckItem(this.chkFlashAttn,    "Flash Attention: faster inference and lower VRAM usage (default: auto).\nChecked = force on; unchecked = use default (auto).\nRequires a compatible model. (-fa)"));
@@ -345,26 +343,27 @@ namespace LlamaServerLauncher
             flwFeatureChecks.Controls.Add(MakeCheckItem(this.chkMmap,         "Memory-map model for faster load (default: enabled).\nUncheck to fully load into RAM (--no-mmap). (--mmap)"));
             flwFeatureChecks.Controls.Add(MakeCheckItem(this.chkMlock,        "Force system to keep model in RAM rather than swapping.\nRequires sufficient free RAM. (--mlock)"));
             flwFeatureChecks.Controls.Add(MakeCheckItem(this.chkContextShift, "Shift context window when full instead of erroring (default: on).\nUncheck (--no-context-shift) to return an error when context is exhausted.\nLeave on for infinite generation / long conversations."));
+            flwFeatureChecks.Controls.Add(MakeCheckItem(this.chkJinja,        "Use Jinja2 engine to parse the model's chat template (default: off).\nEnable if the model ships a Jinja template and prompts look wrong with the built-in parser. (--jinja)"));
 
             var grpFeatures = MakeGroup("Features");
+            grpFeatures.Dock = DockStyle.Top;
             grpFeatures.Controls.Add(flwFeatureChecks);
             grpFeatures.Controls.Add(tlpReasoning); // added last → rendered on top (DockStyle.Top stacking)
 
-            // ── Two-row GroupBox layout: [GPU & Threading | Context & Cache] / [Features full-width]
+            // ── Three-column GroupBox layout: [GPU & Threading | Context & Cache | Features]
             var tlpParamCols = new TableLayoutPanel
             {
                 AutoSize = true, Dock = DockStyle.Top,
-                ColumnCount = 2, RowCount = 2, Margin = new Padding(0),
+                ColumnCount = 3, RowCount = 1, Margin = new Padding(0),
                 MinimumSize = new Size(0, 60)
             };
-            tlpParamCols.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 45.00F));
-            tlpParamCols.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 55.00F));
-            tlpParamCols.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            tlpParamCols.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 35.00F));
+            tlpParamCols.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40.00F));
+            tlpParamCols.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25.00F));
             tlpParamCols.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             tlpParamCols.Controls.Add(grpGpuThreading, 0, 0);
             tlpParamCols.Controls.Add(grpCtxCache,     1, 0);
-            tlpParamCols.Controls.Add(grpFeatures,     0, 1);
-            tlpParamCols.SetColumnSpan(grpFeatures, 2);
+            tlpParamCols.Controls.Add(grpFeatures,     2, 0);
             Span3(tlpModel, tlpParamCols, 0, 2);
 
             // ── Hardware heading (row 3) ──────────────────────────────────
@@ -728,9 +727,9 @@ namespace LlamaServerLauncher
             void refreshPreview(object s, System.EventArgs e) => UpdateCommandPreview();
             foreach (var n in new NumericUpDown[] { nudCtxSize, nudPort, nudThreads, nudThreadsBatch, nudParallel, nudBatchSize, nudUBatchSize, nudDefragThold, nudCacheReuse, nudTemperature, nudTopK, nudTopP, nudMinP, nudSeed, nudRepeatPenalty })
                 n.ValueChanged += refreshPreview;
-            foreach (var c in new CheckBox[] { chkFlashAttn, chkContBatching, chkMmap, chkMlock, chkEmbedding, chkRerank, chkMetrics, chkThreadsAuto, chkThreadsBatchAuto, chkCtxDefault, chkSeedRandom, chkMmproj, chkKvOffload, chkContextShift, chkNglAuto })
+            foreach (var c in new CheckBox[] { chkFlashAttn, chkContBatching, chkJinja, chkMmap, chkMlock, chkEmbedding, chkRerank, chkMetrics, chkThreadsAuto, chkThreadsBatchAuto, chkCtxDefault, chkSeedRandom, chkMmproj, chkKvOffload, chkContextShift, chkNglAuto })
                 c.CheckedChanged += refreshPreview;
-            this.trkGpuLayers.Scroll += refreshPreview;
+            this.nudGpuLayers.ValueChanged += refreshPreview;
             foreach (var c in new ComboBox[] { cbModel, cbCacheK, cbCacheV, cbReasoning, cbSplitMode })
                 c.SelectedIndexChanged += refreshPreview;
             foreach (var r in new RadioButton[] { rdoHostLocal, rdoHostAll, rdoHostCustom })
