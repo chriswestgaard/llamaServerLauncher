@@ -85,7 +85,9 @@ namespace LlamaServerLauncher
         private readonly List<float> _metricsGpuPct = new();
         private readonly List<float> _metricsVramGb = new();
         private readonly List<float> _metricsGenTokPerSec = new();
+        private readonly List<int> _metricsGenCtxSize = new();
         private readonly List<float> _metricsPrefillTokPerSec = new();
+        private readonly List<int> _metricsPrefillCtxSize = new();
         private float _pendingPrefillTps = -1f;
         private readonly string _perfRequestsPath = "performance_requests.json";
 
@@ -386,7 +388,7 @@ namespace LlamaServerLauncher
                 _sessionModel = cbModel.SelectedItem?.ToString() ?? "";
                 _sessionArgs = args;
                 _metricsCpu.Clear(); _metricsRamGb.Clear(); _metricsGpuPct.Clear(); _metricsVramGb.Clear();
-                _metricsGenTokPerSec.Clear(); _metricsPrefillTokPerSec.Clear();
+                _metricsGenTokPerSec.Clear(); _metricsGenCtxSize.Clear(); _metricsPrefillTokPerSec.Clear(); _metricsPrefillCtxSize.Clear();
                 _pendingPrefillTps = -1f;
 
                 lock (_logLock)
@@ -1213,14 +1215,16 @@ namespace LlamaServerLauncher
                             if (text.Contains("prompt eval"))
                             {
                                 _metricsPrefillTokPerSec.Add(tps);
+                                _metricsPrefillCtxSize.Add(_ctxCurrent);
                                 _pendingPrefillTps = tps;
                             }
                             else
                             {
                                 _metricsGenTokPerSec.Add(tps);
+                                _metricsGenCtxSize.Add(_ctxCurrent);
                                 float prefill = _pendingPrefillTps;
                                 _pendingPrefillTps = -1f;
-                                this.BeginInvoke(new Action(() => SavePerfRequest(tps, prefill)));
+                                this.BeginInvoke(new Action(() => SavePerfRequest(tps, prefill, _ctxCurrent)));
                             }
                         }
                     }
@@ -1640,17 +1644,21 @@ namespace LlamaServerLauncher
 
             // Rolling average of the last 5 completed-request tok/s values
             float recentTps = -1;
+            double recentCtx = 0;
             if (_metricsGenTokPerSec.Count > 0)
             {
                 int take = Math.Min(5, _metricsGenTokPerSec.Count);
                 recentTps = (float)_metricsGenTokPerSec.Skip(_metricsGenTokPerSec.Count - take).Average();
+                recentCtx = _metricsGenCtxSize.Skip(_metricsGenCtxSize.Count - take).Average();
             }
 
             float recentPpTps = -1;
+            double recentCcx = 0;
             if (_metricsPrefillTokPerSec.Count > 0)
             {
                 int take = Math.Min(5, _metricsPrefillTokPerSec.Count);
                 recentPpTps = (float)_metricsPrefillTokPerSec.Skip(_metricsPrefillTokPerSec.Count - take).Average();
+                recentCcx = _metricsPrefillCtxSize.Skip(_metricsPrefillCtxSize.Count - take).Average();
             }
 
             if (!serverRunning)
@@ -1681,27 +1689,27 @@ namespace LlamaServerLauncher
 
             // 1. Generation speed (tg)
             if (recentTps >= 40)
-                Line($"▶ Generation (tg): {recentTps:F1} t/s — excellent.", green);
+                Line($"▶ Generation (tg): {recentTps:F1} t/s {(recentCtx > 0 ? $"@ {recentCtx:F0} context" : "")} — excellent.", green);
             else if (recentTps >= 20)
-                Line($"▶ Generation (tg): {recentTps:F1} t/s — good.", green);
+                Line($"▶ Generation (tg): {recentTps:F1} t/s {(recentCtx > 0 ? $"@ {recentCtx:F0} context" : "")} — good.", green);
             else if (recentTps >= 8)
                 Line(GpuLayersValue == 999
-                    ? $"▶ Generation (tg): {recentTps:F1} t/s — moderate. All layers are already on GPU; try reducing context size (-c) or enabling Flash Attention to improve speed."
-                    : $"▶ Generation (tg): {recentTps:F1} t/s — moderate. Consider increasing GPU layers (-ngl) if VRAM has headroom.", amber);
+                    ? $"▶ Generation (tg): {recentTps:F1} t/s {(recentCtx > 0 ? $"@ {recentCtx:F0} context" : "")} — moderate. All layers are already on GPU; try reducing context size (-c) or enabling Flash Attention to improve speed."
+                    : $"▶ Generation (tg): {recentTps:F1} t/s {(recentCtx > 0 ? $"@ {recentCtx:F0} context" : "")} — moderate. Consider increasing GPU layers (-ngl) if VRAM has headroom.", amber);
             else if (recentTps >= 0)
-                Line($"▶ Generation (tg): {recentTps:F1} t/s — slow. Most work is likely on CPU; increase -ngl to offload more layers to GPU.", red);
+                Line($"▶ Generation (tg): {recentTps:F1} t/s {(recentCtx > 0 ? $"@ {recentCtx:F0} context" : "")} — slow. Most work is likely on CPU; increase -ngl to offload more layers to GPU.", red);
             else
                 Line("▶ No requests completed yet — send a prompt to measure generation speed.", dim);
 
             // 2. Prompt processing speed (pp)
             if (recentPpTps >= 500)
-                Line($"▶ Prompt processing (pp): {recentPpTps:F0} t/s — excellent.", green);
+                Line($"▶ Prompt processing (pp): {recentPpTps:F0} t/s {(recentCcx > 0 ? $"@ {recentCcx:F0} context" : "")} — excellent.", green);
             else if (recentPpTps >= 200)
-                Line($"▶ Prompt processing (pp): {recentPpTps:F0} t/s — good.", green);
+                Line($"▶ Prompt processing (pp): {recentPpTps:F0} t/s {(recentCcx > 0 ? $"@ {recentCcx:F0} context" : "")} — good.", green);
             else if (recentPpTps >= 50)
-                Line($"▶ Prompt processing (pp): {recentPpTps:F0} t/s — moderate.", amber);
+                Line($"▶ Prompt processing (pp): {recentPpTps:F0} t/s {(recentCcx > 0 ? $"@ {recentCcx:F0} context" : "")} — moderate.", amber);
             else if (recentPpTps >= 0)
-                Line($"▶ Prompt processing (pp): {recentPpTps:F0} t/s — slow. Increasing batch size (-b) or GPU layers may help.", red);
+                Line($"▶ Prompt processing (pp): {recentPpTps:F0} t/s {(recentCcx > 0 ? $"@ {recentCcx:F0} context" : "")} — slow. Increasing batch size (-b) or GPU layers may help.", red);
 
             // 2. GPU vs CPU balance (only meaningful when we have actual tok/s evidence the model is working)
             if (hasGpu && _lastGpuPct >= 0 && _lastCpu >= 0 && recentTps >= 0)
@@ -1788,12 +1796,12 @@ namespace LlamaServerLauncher
             catch (Exception ex) { AppendLog($"--- perf log write failed: {ex.Message} ---", isError: true); }
         }
 
-        private void SavePerfRequest(float genTps, float prefillTps)
+        private void SavePerfRequest(float genTps, float prefillTps, int ctxSize)
         {
             try
             {
                 var opts = _jsonOpts;
-                var req = new PerfRequest(DateTime.UtcNow.ToString("o"), _sessionModel, genTps, prefillTps, _sessionArgs, ParsePerfParams(_sessionArgs));
+                var req = new PerfRequest(DateTime.UtcNow.ToString("o"), _sessionModel, genTps, prefillTps, _sessionArgs, ParsePerfParams(_sessionArgs), ctxSize);
                 var list = new List<PerfRequest>();
                 if (File.Exists(_perfRequestsPath))
                     try { list = JsonSerializer.Deserialize<List<PerfRequest>>(File.ReadAllText(_perfRequestsPath), opts) ?? list; } catch { }
@@ -1887,7 +1895,7 @@ namespace LlamaServerLauncher
                     {
                         var ts      = DateTime.Parse(r.Timestamp, null, DateTimeStyles.RoundtripKind).ToLocalTime();
                         string pre  = r.PrefillTps >= 0 ? $"   prefill {FmtTps(r.PrefillTps)} t/s" : "";
-                        var runNode = new TreeNode($"{ts:yyyy-MM-dd HH:mm}   gen {FmtTps(r.GenTps)} t/s{pre}")
+                        var runNode = new TreeNode($"{ts:yyyy-MM-dd HH:mm}   gen {FmtTps(r.GenTps)} t/s{pre}{(r.CtxSize > 0 ? $" @ {r.CtxSize:N0} context" : "")}")
                         {
                             ForeColor = System.Drawing.Color.DimGray,
                             Tag       = new PerfConfigItem { Model = modelGroup.Key, Params = Params, ArgsLabel = ArgsLabel, GenAvg = GenAvg, IsCurrent = false }
@@ -1940,7 +1948,7 @@ namespace LlamaServerLauncher
                 $"{Model}  |  {ArgsLabel}" + (GenAvg >= 0 ? $"  ({GenAvg:F1} t/s)" : "");
         }
 
-        private record PerfRequest(string Timestamp, string Model, float GenTps, float PrefillTps, string Args, PerfParams? Params = null);
+        private record PerfRequest(string Timestamp, string Model, float GenTps, float PrefillTps, string Args, PerfParams? Params = null, int CtxSize = 0);
         private record PerfMetricStats(double Avg, double Min, double Max);
         private record PerfSession(
             string Start, string End, int DurationSeconds,
