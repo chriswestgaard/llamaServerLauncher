@@ -114,7 +114,7 @@ namespace LlamaServerLauncher
             else
             {
                 using var dialog = new FolderBrowserDialog { Description = "Select folder containing .gguf model files" };
-                if (dialog.ShowDialog() == DialogResult.OK)
+                if (dialog.ShowDialog(this) == DialogResult.OK)
                 {
                     _modelFolder = dialog.SelectedPath;
                     SaveConfig();
@@ -128,7 +128,7 @@ namespace LlamaServerLauncher
             if (string.IsNullOrEmpty(_modelFolder)) return;
             if (!Directory.Exists(_modelFolder))
             {
-                MessageBox.Show($"Folder not found: {_modelFolder}");
+                MessageBox.Show(this, $"Folder not found: {_modelFolder}");
                 return;
             }
             var files = Directory.GetFiles(_modelFolder, "*.gguf");
@@ -172,7 +172,7 @@ namespace LlamaServerLauncher
             else if (isRunning)
             {
                 lblStatus.Text      = "Running…";
-                lblStatus.ForeColor = System.Drawing.SystemColors.ControlText;
+                lblStatus.ForeColor = _isDark ? Color.FromArgb(210, 210, 210) : SystemColors.ControlText;
                 btnLaunch.Text      = "Stop Server";
                 btnLaunch.BackColor = System.Drawing.SystemColors.Control;
                 btnLaunch.ForeColor = System.Drawing.SystemColors.ControlText;
@@ -199,13 +199,13 @@ namespace LlamaServerLauncher
 
             if (cbModel.SelectedItem == null)
             {
-                MessageBox.Show("Choose a model first.");
+                MessageBox.Show(this, "Choose a model first.");
                 return;
             }
 
             if (!File.Exists(txtExePath.Text))
             {
-                MessageBox.Show($"llama-server executable not found:\n{txtExePath.Text}\n\nUse the Advanced tab to set the correct path.", "Executable not found", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, $"llama-server executable not found:\n{txtExePath.Text}\n\nUse the Advanced tab to set the correct path.", "Executable not found", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
 
@@ -366,7 +366,7 @@ namespace LlamaServerLauncher
                         if (_proc != thisProc) return; // a restart started a new process — skip cleanup
                         AppendLog($"--- process exited (code {code}) ---", isError: false);
                         lblStatus.Text      = $"Stopped (exit code {code})";
-                        lblStatus.ForeColor = System.Drawing.SystemColors.ControlText;
+                        lblStatus.ForeColor = _isDark ? Color.FromArgb(210, 210, 210) : SystemColors.ControlText;
                         btnLaunch.Text      = "Launch llama-server";
                         btnLaunch.BackColor = System.Drawing.SystemColors.Control;
                         btnLaunch.ForeColor = System.Drawing.SystemColors.ControlText;
@@ -407,13 +407,14 @@ namespace LlamaServerLauncher
                 AppendLog($"--- started: {txtExePath.Text} ---", isError: false);
                 UpdatePerformanceTips();
                 lblStatus.Text      = "Starting…";
+                lblStatus.ForeColor = _isDark ? Color.FromArgb(210, 210, 210) : SystemColors.ControlText;
                 btnLaunch.Text      = "Stop Server";
                 btnLaunch.BackColor = System.Drawing.SystemColors.Control;
                 btnLaunch.ForeColor = System.Drawing.SystemColors.ControlText;
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Error launching: {ex.Message}");
+                MessageBox.Show(this, $"Error launching: {ex.Message}");
             }
         }
 
@@ -424,7 +425,7 @@ namespace LlamaServerLauncher
             using var dialog = new FolderBrowserDialog { Description = "Select model folder" };
             if (!string.IsNullOrEmpty(_modelFolder))
                 dialog.SelectedPath = _modelFolder;
-            if (dialog.ShowDialog() == DialogResult.OK)
+            if (dialog.ShowDialog(this) == DialogResult.OK)
             {
                 _modelFolder = dialog.SelectedPath;
                 SaveConfig();
@@ -467,7 +468,7 @@ namespace LlamaServerLauncher
                 try { dialog.InitialDirectory = Path.GetDirectoryName(_mmprojPath); } catch { }
             else if (!string.IsNullOrEmpty(_modelFolder))
                 dialog.InitialDirectory = _modelFolder;
-            if (dialog.ShowDialog() == DialogResult.OK)
+            if (dialog.ShowDialog(this) == DialogResult.OK)
             {
                 _mmprojPath = dialog.FileName;
                 txtMmprojPath.Text = _mmprojPath;
@@ -480,7 +481,7 @@ namespace LlamaServerLauncher
         {
             if (_proc == null || _proc.HasExited || string.IsNullOrEmpty(_chatUiUrl))
             {
-                MessageBox.Show("Start the llama-server first before opening the Chat UI.", "Server not running", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                MessageBox.Show(this, "Start the llama-server first before opening the Chat UI.", "Server not running", MessageBoxButtons.OK, MessageBoxIcon.Warning);
                 return;
             }
             string url = _chatUiUrl;
@@ -494,7 +495,7 @@ namespace LlamaServerLauncher
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Failed to open Chat UI: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                MessageBox.Show(this, $"Failed to open Chat UI: {ex.Message}", "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
         }
 
@@ -512,7 +513,7 @@ namespace LlamaServerLauncher
 
         private void btnResetDefaults_Click(object sender, EventArgs e)
         {
-            if (MessageBox.Show("Reset all settings to default values?", "Reset defaults",
+            if (MessageBox.Show(this, "Reset all settings to default values?", "Reset defaults",
                     MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) == DialogResult.OK)
                 ApplyDefaults();
         }
@@ -587,7 +588,7 @@ namespace LlamaServerLauncher
             };
             if (!string.IsNullOrEmpty(txtExePath.Text))
                 try { dialog.InitialDirectory = Path.GetDirectoryName(txtExePath.Text); } catch { }
-            if (dialog.ShowDialog() == DialogResult.OK)
+            if (dialog.ShowDialog(this) == DialogResult.OK)
             {
                 txtExePath.Text = dialog.FileName;
                 SaveConfig();
@@ -1277,7 +1278,7 @@ namespace LlamaServerLauncher
                     if (parts.Count == 0) return; // nothing significant changed — no need to interrupt
 
                     string detail = string.Join("\n", parts);
-                    MessageBox.Show(
+                    MessageBox.Show(this,
                         "The auto-fit algorithm adjusted parameters to fit within available VRAM:\n\n" +
                         detail + "\n\n" +
                         "These values have been updated in the UI.",
@@ -1308,10 +1309,10 @@ namespace LlamaServerLauncher
                 int newCtx = _fitReducedCtxSize;
                 BeginInvoke(new Action(() =>
                 {
-                    string ctxDetail = newCtx > 0 ? $" Context was reduced to {newCtx} tokens." : "";
-                    MessageBox.Show(
+                    if (newCtx <= 0) return; // nothing changed — no need to interrupt
+                    MessageBox.Show(this,
                         "The server could not reserve VRAM headroom because GPU Layers is set to \"GPU only\" (-ngl 999).\n\n" +
-                        $"The auto-fit algorithm reduced your context size instead.{ctxDetail}\n\n" +
+                        $"The auto-fit algorithm reduced your context size to {newCtx} tokens instead.\n\n" +
                         "To let the fit algorithm also adjust layer count: uncheck \"Auto\" on the GPU Layers slider and move it away from the GPU-only end.",
                         "Context auto-reduced — GPU layers locked",
                         MessageBoxButtons.OK,
@@ -1718,7 +1719,13 @@ namespace LlamaServerLauncher
             if (vramPct > 95)
             {
                 if (kvInVram)
-                    Line($"▶ VRAM critically full ({vramPct:F0}%). Reduce context size (-c) or switch KV cache to q8_0/q4_0 to avoid OOM.", red);
+                {
+                    bool kvAlreadyQ4 = cbCacheK.Text == "q4_0" && cbCacheV.Text == "q4_0";
+                    if (kvAlreadyQ4)
+                        Line($"▶ VRAM critically full ({vramPct:F0}%). Reduce context size (-c) to avoid OOM.", red);
+                    else
+                        Line($"▶ VRAM critically full ({vramPct:F0}%). Reduce context size (-c) or switch KV cache to q8_0/q4_0 to avoid OOM.", red);
+                }
                 else
                     Line($"▶ VRAM critically full ({vramPct:F0}%). Reduce GPU layers (-ngl) to move model weight layers to CPU/RAM.", red);
             }

@@ -29,7 +29,7 @@ using System;
               btnBrowse = new Button { Text = "Browse…", Left = 330, Top = 5, Width = 60 };
               btnBrowse.Click += (s, e) => {
                   using var dlg = new FolderBrowserDialog();
-                  if (dlg.ShowDialog() == DialogResult.OK)
+                  if (dlg.ShowDialog(this) == DialogResult.OK)
                       txtFolder.Text = dlg.SelectedPath;
               };
               p.Controls.Add(btnBrowse);
