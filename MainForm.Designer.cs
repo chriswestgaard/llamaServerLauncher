@@ -254,9 +254,9 @@ this.lblLayerCount = new Label { AutoSize = true, ForeColor = System.Drawing.Col
             Span3(tlpModel, tlpTopHeader, 0, 0);
 
             // ── GroupBox: GPU & Threading (left half, row 2) ─────────────
-            var tlpGpuThreading = MakeTlp(5, 165);
+            var tlpGpuThreading = MakeTlp(5, 185);
 
-            var tlpNgl = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Margin = new Padding(0), AutoSize = true };
+            var tlpNgl = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Margin = new Padding(0), AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MinimumSize = new Size(0, nudGpuLayers.PreferredSize.Height + nudGpuLayers.Margin.Vertical) };
             tlpNgl.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
             tlpNgl.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             tlpNgl.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
@@ -267,13 +267,13 @@ this.lblLayerCount = new Label { AutoSize = true, ForeColor = System.Drawing.Col
             AddRow(tlpGpuThreading, 0, MakeLbl("GPU Layers  (-ngl)"), tlpNgl, "Number of model layers to offload to GPU VRAM.\n0 = CPU only. Max value = GPU only (-ngl 999).\nAuto = server decides at startup. (-ngl)");
             AddRow(tlpGpuThreading, 1, MakeLbl("Split Mode  (-sm)"),  this.cbSplitMode, "Multi-GPU tensor split strategy (default: layer).\nlayer  = split by layers across GPUs.\nnone   = single GPU only.\nrow    = split by matrix rows.\ntensor = split by tensor dimensions. (-sm)");
 
-            var pnlThreads = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+            var pnlThreads = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, MinimumSize = new Size(0, nudThreads.PreferredSize.Height + nudThreads.Margin.Vertical) };
             pnlThreads.Controls.Add(this.chkThreadsAuto);
             pnlThreads.Controls.Add(this.nudThreads);
             this.chkThreadsAuto.CheckedChanged += (_, _) => this.nudThreads.Visible = !this.chkThreadsAuto.Checked;
             AddRow(tlpGpuThreading, 2, MakeLbl("Threads  (-t)"), pnlThreads, "CPU threads used during generation.\nAuto = server detects from CPU core count.\nFor best results, match to physical core count. (-t)");
 
-            var pnlThreadsBatch = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+            var pnlThreadsBatch = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, MinimumSize = new Size(0, nudThreadsBatch.PreferredSize.Height + nudThreadsBatch.Margin.Vertical) };
             pnlThreadsBatch.Controls.Add(this.chkThreadsBatchAuto);
             pnlThreadsBatch.Controls.Add(this.nudThreadsBatch);
             this.chkThreadsBatchAuto.CheckedChanged += (_, _) => this.nudThreadsBatch.Visible = !this.chkThreadsBatchAuto.Checked;
@@ -289,24 +289,20 @@ this.lblLayerCount = new Label { AutoSize = true, ForeColor = System.Drawing.Col
             // ── GroupBox: Context & Cache (right half, row 2) ────────────
             var tlpCtxCache = MakeTlp(7, 185);
 
-             var tlpCtx = new TableLayoutPanel
+            var flpCtx = new FlowLayoutPanel
             {
-                Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1,
-                Margin = new Padding(0), AutoSize = true, MinimumSize = new Size(0, 26)
+                Dock = DockStyle.Fill, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink,
+                Margin = new Padding(0), WrapContents = false
             };
-            tlpCtx.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));      // spinner (fills)
-            tlpCtx.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));      // model-default label
-            tlpCtx.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));      // checkbox
-            tlpCtx.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            tlpCtx.Controls.Add(this.nudCtxSize,    0, 0);
-            tlpCtx.Controls.Add(this.lblCtxSize,    1, 0);
-            tlpCtx.Controls.Add(this.chkCtxDefault, 2, 0);
+            flpCtx.Controls.Add(this.chkCtxDefault);
+            flpCtx.Controls.Add(this.lblCtxSize);
+            flpCtx.Controls.Add(this.nudCtxSize);
             this.chkCtxDefault.CheckedChanged += (_, _) =>
             {
                 this.lblCtxSize.Visible = this.chkCtxDefault.Checked;
                 this.nudCtxSize.Visible = !this.chkCtxDefault.Checked;
             };
-             AddRow(tlpCtxCache, 0, MakeLbl("Context Size  (-c)"),    tlpCtx,             "Maximum number of tokens in the context window.\n\"Model default\" uses the value embedded in the model file.\nLarger contexts require more VRAM/RAM. (-c)");
+             AddRow(tlpCtxCache, 0, MakeLbl("Context Size  (-c)"),    flpCtx,             "Maximum number of tokens in the context window.\n\"Model default\" uses the value embedded in the model file.\nLarger contexts require more VRAM/RAM. (-c)");
             AddRow(tlpCtxCache, 1, MakeLbl("KV Offload"),            this.chkKvOffload,  "Offload KV cache to GPU VRAM (default: on).\nUncheck to keep KV cache in system RAM — useful when VRAM is tight.\n(-nkvo / --no-kv-offload)");
             AddRow(tlpCtxCache, 2, MakeLbl("Batch Size  (-b)"),      this.nudBatchSize,  "Logical maximum batch size (default: 2048).\nLarger values improve prompt-processing throughput. (-b)");
             AddRow(tlpCtxCache, 3, MakeLbl("UBatch Size  (-ub)"),    this.nudUBatchSize, "Physical maximum batch size (default: 512).\nSmaller values reduce peak VRAM usage. (-ub)");
@@ -476,7 +472,7 @@ this.lblLayerCount = new Label { AutoSize = true, ForeColor = System.Drawing.Col
             AddRow(tlpSampling, 1, MakeLbl("Top-K  (0 = disabled)"),   this.nudTopK, "Top-K sampling (default: 40, 0 = disabled).\nOnly sample from the K most likely tokens. (--top-k)");
             AddRow(tlpSampling, 2, MakeLbl("Top-P  (1.0 = disabled)"), this.nudTopP, "Nucleus sampling (default: 0.95, 1.0 = disabled).\nOnly consider tokens within the top cumulative probability. (--top-p)");
             AddRow(tlpSampling, 3, MakeLbl("Min-P  (0.0 = disabled)"), this.nudMinP, "Min-P sampling (default: 0.05, 0.0 = disabled).\nMinimum probability relative to the top token. (--min-p)");
-            var pnlSeed = new FlowLayoutPanel { AutoSize = true, WrapContents = false };
+            var pnlSeed = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, WrapContents = false, MinimumSize = new Size(0, nudSeed.PreferredSize.Height + nudSeed.Margin.Vertical) };
             pnlSeed.Controls.Add(this.chkSeedRandom);
             pnlSeed.Controls.Add(this.nudSeed);
             this.chkSeedRandom.CheckedChanged += (_, _) => this.nudSeed.Visible = !this.chkSeedRandom.Checked;
