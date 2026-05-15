@@ -42,6 +42,9 @@ namespace LlamaServerLauncher
         [DllImport("dwmapi.dll")]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int value, int size);
 
+        [DllImport("user32.dll")]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
         private void ApplyDwmDark(bool dark)
         {
             if (!IsHandleCreated) return;
@@ -509,7 +512,9 @@ namespace LlamaServerLauncher
 
         private void btnResetDefaults_Click(object sender, EventArgs e)
         {
-            ApplyDefaults();
+            if (MessageBox.Show("Reset all settings to default values?", "Reset defaults",
+                    MessageBoxButtons.OKCancel, MessageBoxIcon.Warning) == DialogResult.OK)
+                ApplyDefaults();
         }
 
         private void ApplyDefaults()
@@ -980,8 +985,11 @@ namespace LlamaServerLauncher
             try { File.WriteAllText(_configPath, JsonSerializer.Serialize(s, _jsonOptsIndented)); } catch { }
         }
 
+        private const int WM_SETREDRAW = 0x000B;
+
         private void ApplyTheme(bool dark)
         {
+            SendMessage(Handle, WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
             _isDark = dark;
             var formBg  = dark ? Color.FromArgb(32, 32, 32)   : SystemColors.Control;
             var inputBg = dark ? Color.FromArgb(50, 50, 50)   : SystemColors.Window;
@@ -1092,8 +1100,8 @@ namespace LlamaServerLauncher
 
             // moon (E708) shown in light mode; sun (E706) shown in dark mode
             btnDarkMode.Text = dark ? "" : "";
-            tabMain.Invalidate();
-            btnOpenChat.Invalidate();
+            SendMessage(Handle, WM_SETREDRAW, new IntPtr(1), IntPtr.Zero);
+            Refresh();
         }
 
         private void tabMain_DrawItem(object sender, DrawItemEventArgs e)

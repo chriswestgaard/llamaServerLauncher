@@ -161,10 +161,10 @@ namespace LlamaServerLauncher
             {
                 Text = "",
                 Size = new Size(44, 44),
-                Margin = new Padding(0, 0, 0, 4),
+                Margin = new Padding(0, 4, 4, 4),
                 Font = new Font("Segoe MDL2 Assets", this.Font.Size + 4F, FontStyle.Regular),
                 FlatStyle = FlatStyle.Standard,
-                BackColor = Color.FromArgb(91, 124, 153),
+                BackColor = Color.FromArgb(180, 110, 30),
                 ForeColor = Color.White,
                 UseVisualStyleBackColor = false,
                 TextAlign = ContentAlignment.MiddleCenter,
@@ -211,11 +211,10 @@ namespace LlamaServerLauncher
             // ── Top header: 2 columns [Model File | Image Input] on left, [Reset | Open Chat] on right ──
             var tlpTopHeader = new TableLayoutPanel
             {
-                Dock = DockStyle.Top, ColumnCount = 2, RowCount = 2,
+                Dock = DockStyle.Top, ColumnCount = 1, RowCount = 2,
                 Margin = new Padding(0), AutoSize = true, Padding = new Padding(4, 4, 4, 4)
             };
-            tlpTopHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 70F));   // Left: model file + image input
-            tlpTopHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30F));   // Right: buttons
+            tlpTopHeader.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
             tlpTopHeader.RowStyles.Add(new RowStyle(SizeType.AutoSize));
             tlpTopHeader.RowStyles.Add(new RowStyle(SizeType.AutoSize));
 
@@ -251,34 +250,7 @@ namespace LlamaServerLauncher
             };
             AddRow(tlpLeft, 1, MakeLbl("Image Input  (--mmproj)"), tlpMmprojRow, "Load a multimodal projector (.gguf) to enable image/vision input.\nRequired for vision-capable models such as LLaVA or Qwen-VL.\n(--mmproj)");
 
-            // Right column: Default values button
-            var tlpRight = new TableLayoutPanel
-            {
-                Dock = DockStyle.None, ColumnCount = 1, RowCount = 2,
-                Anchor = AnchorStyles.Top | AnchorStyles.Right,
-                Margin = new Padding(4, 0, 4, 0), AutoSize = true, Padding = new Padding(4, 4, 4, 4)
-            };
-            tlpRight.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-            tlpRight.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            tlpRight.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            tlpRight.Controls.Add(this.btnResetDefaults, 0, 0);
-
-            var lblResetDefaults = new Label
-            {
-                Text = "Reset defaults",
-                AutoSize = true,
-                TextAlign = ContentAlignment.MiddleCenter,
-                Anchor = AnchorStyles.Top,
-                Margin = new Padding(0, 2, 0, 0),
-                ForeColor = Color.FromArgb(90, 90, 90)
-            };
-            _tip.SetToolTip(lblResetDefaults, "Reset all parameters to default values");
-            tlpRight.Controls.Add(lblResetDefaults, 0, 1);
-
-            // Center the button horizontally over the label
-            this.btnResetDefaults.Anchor = AnchorStyles.Top;
             tlpTopHeader.Controls.Add(tlpLeft, 0, 0);
-            tlpTopHeader.Controls.Add(tlpRight, 1, 0);
             Span3(tlpModel, tlpTopHeader, 0, 0);
 
             // ── GroupBox: GPU & Threading (left half, row 2) ─────────────
@@ -721,17 +693,19 @@ namespace LlamaServerLauncher
             this.tlpMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 72F));   // cmd preview
             this.tlpMain.RowStyles.Add(new RowStyle(SizeType.Absolute, 44F));   // status + launch
 
-            // Status label on left, dark mode toggle + Open Chat + Launch buttons on right — all in one row
-            var tlpStatusBar = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 1, Margin = new Padding(0) };
+            // Status label on left, reset + dark mode toggle + Open Chat + Launch buttons on right — all in one row
+            var tlpStatusBar = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 5, RowCount = 1, Margin = new Padding(0) };
             tlpStatusBar.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));    // status fills
+            tlpStatusBar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 52F));    // reset defaults
             tlpStatusBar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 52F));    // dark mode toggle
             tlpStatusBar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180F));   // open chat ui
             tlpStatusBar.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 240F));   // launch fixed width
             tlpStatusBar.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
-            tlpStatusBar.Controls.Add(this.lblStatus,   0, 0);
-            tlpStatusBar.Controls.Add(this.btnDarkMode, 1, 0);
-            tlpStatusBar.Controls.Add(this.btnOpenChat, 2, 0);
-            tlpStatusBar.Controls.Add(this.btnLaunch,   3, 0);
+            tlpStatusBar.Controls.Add(this.lblStatus,        0, 0);
+            tlpStatusBar.Controls.Add(this.btnResetDefaults, 1, 0);
+            tlpStatusBar.Controls.Add(this.btnDarkMode,      2, 0);
+            tlpStatusBar.Controls.Add(this.btnOpenChat,      3, 0);
+            tlpStatusBar.Controls.Add(this.btnLaunch,        4, 0);
 
             var lblCmdHint = new Label { Text = "Command preview — click to copy", Dock = DockStyle.Fill, Font = new Font(this.Font.FontFamily, 7F), ForeColor = System.Drawing.SystemColors.GrayText, TextAlign = System.Drawing.ContentAlignment.MiddleLeft, Padding = new Padding(2, 0, 0, 0) };
             this.tlpMain.Controls.Add(this.tabMain,       0, 0);
