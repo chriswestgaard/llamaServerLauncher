@@ -123,7 +123,7 @@ this.lblLayerCount = new Label { AutoSize = true, ForeColor = System.Drawing.Col
             this.nudUBatchSize   = new NumericUpDown { Dock = DockStyle.Fill, Minimum = 1,  Maximum = 65536, Value = 512  };
             this.chkFlashAttn    = new CheckBox { Text = "Flash Attention",    AutoSize = true, Checked = false };
             this.chkContBatching = new CheckBox { Text = "Continuous Batching", AutoSize = true, Checked = false };
-            this.chkJinja        = new CheckBox { Text = "Jinja Templates",     AutoSize = true, Checked = false };
+            this.chkJinja        = new CheckBox { Text = "Jinja Templates",     AutoSize = true, Checked = true };
             this.txtTools        = new TextBox  { Dock = DockStyle.Fill, Text = "" };
 
             this.cbCacheK    = new ComboBox { Dock = DockStyle.Fill, DropDownStyle = ComboBoxStyle.DropDownList };
@@ -148,7 +148,7 @@ this.lblLayerCount = new Label { AutoSize = true, ForeColor = System.Drawing.Col
             this.nudMinP          = new NumericUpDown { Dock = DockStyle.Fill, Minimum = 0M, Maximum = 1M,           Value = 0.05M, DecimalPlaces = 2, Increment = 0.01M };
             this.chkSeedRandom    = new CheckBox { Text = "Random", AutoSize = true, Checked = true, Margin = new Padding(0, 2, 8, 0) };
             this.nudSeed          = new NumericUpDown { Minimum = 0, Maximum = int.MaxValue, Value = 0, Width = 100, Visible = false };
-            this.nudRepeatPenalty = new NumericUpDown { Dock = DockStyle.Fill, Minimum = 0M, Maximum = 3M,           Value = 1.00M, DecimalPlaces = 2, Increment = 0.05M };
+            this.nudRepeatPenalty = new NumericUpDown { Dock = DockStyle.Fill, Minimum = 0M, Maximum = 3M,           Value = 1.10M, DecimalPlaces = 2, Increment = 0.05M };
 
             this.txtApiKey    = new TextBox { Dock = DockStyle.Fill };
             this.txtExePath   = new TextBox { Dock = DockStyle.Fill };
@@ -339,7 +339,7 @@ this.lblLayerCount = new Label { AutoSize = true, ForeColor = System.Drawing.Col
             flwFeatureChecks.Controls.Add(MakeCheckItem(this.chkMmap,         "Memory-map model for faster load (default: enabled).\nUncheck to fully load into RAM (--no-mmap). (--mmap)"));
             flwFeatureChecks.Controls.Add(MakeCheckItem(this.chkMlock,        "Force system to keep model in RAM rather than swapping.\nRequires sufficient free RAM. (--mlock)"));
             flwFeatureChecks.Controls.Add(MakeCheckItem(this.chkContextShift, "Shift context window when full instead of erroring (default: on).\nUncheck (--no-context-shift) to return an error when context is exhausted.\nLeave on for infinite generation / long conversations."));
-            flwFeatureChecks.Controls.Add(MakeCheckItem(this.chkJinja,        "Use Jinja2 engine to parse the model's chat template (default: off).\nEnable if the model ships a Jinja template and prompts look wrong with the built-in parser. (--jinja)"));
+            flwFeatureChecks.Controls.Add(MakeCheckItem(this.chkJinja,        "Use Jinja2 engine to parse the model's chat template (default: on).\nUncheck to disable (--no-jinja). Leave on unless you have template parsing issues. (--no-jinja)"));
 
             var grpFeatures = MakeGroup("Features");
             grpFeatures.Dock = DockStyle.Top;
@@ -477,7 +477,7 @@ this.lblLayerCount = new Label { AutoSize = true, ForeColor = System.Drawing.Col
             pnlSeed.Controls.Add(this.nudSeed);
             this.chkSeedRandom.CheckedChanged += (_, _) => this.nudSeed.Visible = !this.chkSeedRandom.Checked;
             AddRow(tlpSampling, 4, MakeLbl("Seed  (-s)"), pnlSeed, "RNG seed for reproducible outputs.\nRandom = different output each run.\nFixed seed = same output for the same prompt. (-s)");
-            AddRow(tlpSampling, 5, MakeLbl("Repeat Penalty"),    this.nudRepeatPenalty, "Penalize repeat sequence of tokens (default: 1.00, 1.0 = disabled).\nHigher values reduce repetition. (--repeat-penalty)");
+            AddRow(tlpSampling, 5, MakeLbl("Repeat Penalty"),    this.nudRepeatPenalty, "Penalize repeat sequence of tokens (default: 1.10, 1.0 = disabled).\nHigher values reduce repetition. (--repeat-penalty)");
             this.tabSampling.Controls.Add(Scrollable(tlpSampling));
 
             // ── ADVANCED TAB ────────────────────────────────────────────
