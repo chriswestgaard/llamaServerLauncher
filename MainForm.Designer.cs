@@ -102,7 +102,7 @@ this.lblLayerCount = new Label { AutoSize = true, ForeColor = System.Drawing.Col
             this.chkCtxDefault   = new CheckBox { Text = "Model default", AutoSize = true, Checked = true, Margin = new Padding(0, 2, 0, 0) };
             this.lblCtxSize      = new Label { AutoSize = true, ForeColor = System.Drawing.Color.DimGray, Margin = new Padding(0, 4, 0, 0), Text = "" };
             this.lblCtxPerSlot   = new Label { AutoSize = true, ForeColor = System.Drawing.Color.DimGray, Margin = new Padding(6, 4, 0, 0), Text = "" };
-            this.nudCtxSize      = new NumericUpDown { Minimum = 512, Maximum = 10000000, Value = 4096, Increment = 1024, Dock = DockStyle.Fill, Visible = false, TextAlign = HorizontalAlignment.Right };
+            this.nudCtxSize      = new NumericUpDown { Minimum = 512, Maximum = 10000000, Value = 4096, Increment = 1024, Dock = DockStyle.Fill, Visible = false, TextAlign = HorizontalAlignment.Right, Margin = new Padding(0, 0, 0, 4) };
             this.txtCpuInfo      = new TextBox { ReadOnly = true, Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, BackColor = System.Drawing.SystemColors.Control, ForeColor = System.Drawing.Color.DimGray, TabStop = false };
             this.txtGpuInfo      = new TextBox { ReadOnly = true, Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, BackColor = System.Drawing.SystemColors.Control, ForeColor = System.Drawing.Color.DimGray, TabStop = false };
             this.graphCpu  = new UsageGraph { Dock = DockStyle.Fill, Title = "CPU",     GraphColor = Color.FromArgb( 19, 194,  56), Margin = new Padding(0, 2, 2, 0) };
@@ -182,7 +182,7 @@ this.lblLayerCount = new Label { AutoSize = true, ForeColor = System.Drawing.Col
                 ForeColor = Color.White,
                 UseVisualStyleBackColor = false,
                 TextAlign = ContentAlignment.MiddleCenter,
-                Padding = new Padding(0)
+                Padding = new Padding(2, 0, 0, 0)
             };
             _tip.SetToolTip(this.btnDarkMode, "Toggle dark/light theme");
             this.btnOpenChat      = new Button { Text = "Open Chat UI", Dock = DockStyle.Fill, Margin = new Padding(0, 4, 0, 4), Font = new Font(this.Font, FontStyle.Bold), Enabled = false };
